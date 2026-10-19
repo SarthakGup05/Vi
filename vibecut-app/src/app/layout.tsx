@@ -17,13 +17,17 @@ export const metadata: Metadata = {
   description: "The smartest way to edit shorts. No VPNs, no timelines, just viral videos in 60 seconds.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} dark antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-screen bg-[#09090B] text-zinc-100">{children}</body>
     </html>
   );
 }
