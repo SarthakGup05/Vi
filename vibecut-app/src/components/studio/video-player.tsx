@@ -301,33 +301,31 @@ export function VideoPlayer({
     const activeWords = words.filter((w) => !w.deleted);
     if (activeWords.length === 0) return null;
 
-    // Find the word active at currentTime or closest prior word
-    const currentIndex = activeWords.findIndex(
+    // 1. Find direct active word at currentTime
+    let currentIndex = activeWords.findIndex(
       (w) => currentTime >= w.start && currentTime <= w.end
     );
 
-    let phraseWords: StudioWord[] = [];
-    let highlightedIndex = -1;
-
-    if (currentIndex !== -1) {
-      // Create a 3-5 word window centered around current word
-      const startIdx = Math.floor(currentIndex / 4) * 4;
-      const endIdx = Math.min(startIdx + 4, activeWords.length);
-      phraseWords = activeWords.slice(startIdx, endIdx);
-      highlightedIndex = phraseWords.findIndex((w) => w.id === activeWords[currentIndex].id);
-    } else {
-      // Check if we are between words in an active window
-      const prevWordIdx = activeWords.findLastIndex((w) => w.end <= currentTime);
-      if (prevWordIdx !== -1 && prevWordIdx < activeWords.length - 1) {
-        const nextWord = activeWords[prevWordIdx + 1];
-        if (currentTime < nextWord.start && nextWord.start - currentTime < 1.0) {
-          const startIdx = Math.floor(prevWordIdx / 4) * 4;
-          const endIdx = Math.min(startIdx + 4, activeWords.length);
-          phraseWords = activeWords.slice(startIdx, endIdx);
-          highlightedIndex = phraseWords.findIndex((w) => w.id === activeWords[prevWordIdx].id);
+    // 2. If in a brief pause between words, hold the previous word active for up to 0.8s
+    if (currentIndex === -1) {
+      for (let i = activeWords.length - 1; i >= 0; i--) {
+        if (currentTime >= activeWords[i].end && currentTime <= activeWords[i].end + 0.8) {
+          currentIndex = i;
+          break;
         }
       }
     }
+
+    if (currentIndex === -1) {
+      return null;
+    }
+
+    // Create a 3-4 word window centered around current word
+    const CHUNK_SIZE = 4;
+    const startIdx = Math.floor(currentIndex / CHUNK_SIZE) * CHUNK_SIZE;
+    const endIdx = Math.min(startIdx + CHUNK_SIZE, activeWords.length);
+    const phraseWords = activeWords.slice(startIdx, endIdx);
+    const highlightedIndex = phraseWords.findIndex((w) => w.id === activeWords[currentIndex].id);
 
     return { phraseWords, highlightedIndex };
   }, [words, currentTime]);

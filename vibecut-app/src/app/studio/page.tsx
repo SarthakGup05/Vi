@@ -24,6 +24,7 @@ import {
   extractVideoMetadata,
   detectFillerWords,
   formatTimecode,
+  extractAudioFromMediaFile,
 } from "@/lib/studio-utils";
 import {
   Sparkles,
@@ -249,16 +250,25 @@ export default function StudioPage() {
     }
   };
 
-  // Groq Whisper Transcription Process
+  // Groq Whisper Transcription Process with client-side audio extraction
   const runTranscription = async (file: File) => {
     setTranscriptionState({
-      status: "transcribing",
-      progress: 30,
+      status: "extracting_audio",
+      progress: 20,
     });
 
     try {
+      // Extract lightweight 16kHz mono audio WAV in-browser (~1MB instead of 50-100MB video)
+      const audioPayload = await extractAudioFromMediaFile(file);
+
+      setTranscriptionState({
+        status: "transcribing",
+        progress: 50,
+      });
+
       const formData = new FormData();
-      formData.append("file", file);
+      const audioFileName = file.name.replace(/\.[^/.]+$/, "") + ".wav";
+      formData.append("file", audioPayload, audioFileName);
 
       const res = await fetch("/api/transcribe", {
         method: "POST",
