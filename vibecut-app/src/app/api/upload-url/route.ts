@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPresignedUploadUrl } from "@/lib/aws";
+import { getPresignedUploadUrl, isAwsConfigured } from "@/lib/aws";
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Check if AWS credentials are set
-    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+    if (!isAwsConfigured()) {
       return NextResponse.json(
         {
           error: "AWS credentials not configured. Please add AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env.local",
