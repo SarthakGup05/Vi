@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { transcribeAudio, TranscriptionResult } from "@/lib/groq";
+import { transcribeAudio, isGroqConfigured, TranscriptionResult } from "@/lib/groq";
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!process.env.GROQ_API_KEY) {
+    if (!isGroqConfigured()) {
       // Return a realistic mock transcript if the key isn't pasted yet
       // so the user can test the UI immediately out of the box!
       const mockResult: TranscriptionResult = {

@@ -1,10 +1,17 @@
 import Groq from "groq-sdk";
 
-const apiKey = process.env.GROQ_API_KEY || "";
+export function getGroqClient() {
+  const key = process.env.GROQ_API_KEY?.trim() || "";
+  if (!key) {
+    throw new Error("GROQ_API_KEY is not configured in .env.local");
+  }
+  return new Groq({ apiKey: key });
+}
 
-export const groq = new Groq({
-  apiKey,
-});
+export const isGroqConfigured = (): boolean => {
+  const key = process.env.GROQ_API_KEY?.trim();
+  return Boolean(key && key !== "your_groq_api_key" && key.startsWith("gsk_"));
+};
 
 export interface WordTimestamp {
   word: string;
@@ -39,9 +46,7 @@ export interface TranscriptionResult {
  * Free tier provides fast inference and native Hinglish / multilingual support.
  */
 export async function transcribeAudio(file: File | Blob): Promise<TranscriptionResult> {
-  if (!apiKey) {
-    throw new Error("GROQ_API_KEY is not configured in .env.local");
-  }
+  const groq = getGroqClient();
 
   const response = await groq.audio.transcriptions.create({
     file,
