@@ -27,63 +27,16 @@ interface ProjectVaultDrawerProps {
   activeProjectId?: string;
 }
 
-const DEFAULT_VAULT_PROJECTS: ProjectVaultItem[] = [
-  {
-    id: "proj-1",
-    title: "synth_reel_v3.mp4",
-    updatedAt: "2 mins ago",
-    aspectRatio: "9:16",
-    duration: 32,
-    retentionScore: 96,
-    status: "Ready",
-    thumbnailGradient: "from-violet-900/60 via-purple-900/40 to-black",
-    wordCount: 84,
-  },
-  {
-    id: "proj-2",
-    title: "hormozi_hook_master.mp4",
-    updatedAt: "1 hour ago",
-    aspectRatio: "9:16",
-    duration: 42,
-    retentionScore: 94,
-    status: "Exported",
-    thumbnailGradient: "from-amber-900/50 via-zinc-900 to-black",
-    wordCount: 112,
-  },
-  {
-    id: "proj-3",
-    title: "saas_demo_walkthrough.mp4",
-    updatedAt: "Yesterday",
-    aspectRatio: "16:9",
-    duration: 58,
-    retentionScore: 89,
-    status: "Draft",
-    thumbnailGradient: "from-indigo-900/60 via-blue-900/40 to-black",
-    wordCount: 160,
-  },
-  {
-    id: "proj-4",
-    title: "podcast_quick_take_09.mp4",
-    updatedAt: "3 days ago",
-    aspectRatio: "1:1",
-    duration: 28,
-    retentionScore: 91,
-    status: "Ready",
-    thumbnailGradient: "from-emerald-900/50 via-zinc-900 to-black",
-    wordCount: 68,
-  },
-];
-
 export function ProjectVaultDrawer({
   isOpen,
   onClose,
-  projects = DEFAULT_VAULT_PROJECTS,
+  projects = [],
   onSelectProject,
   onCreateBlank,
   activeProjectId,
 }: ProjectVaultDrawerProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const allProjects = projects.length > 0 ? projects : DEFAULT_VAULT_PROJECTS;
+  const allProjects = projects;
 
   // Keyboard shortcut: Escape closes drawer, ⌘K focuses search
   useEffect(() => {
@@ -185,9 +138,16 @@ export function ProjectVaultDrawer({
         {/* Project Cards List */}
         <div className="flex-1 overflow-y-auto p-3 space-y-2.5 scrollbar-thin scrollbar-thumb-zinc-800">
           {filteredProjects.length === 0 ? (
-            <div className="py-12 text-center text-zinc-500">
-              <Film className="h-8 w-8 mx-auto mb-2 opacity-40" />
-              <p className="text-xs">No matching projects found</p>
+            <div className="py-14 px-4 text-center text-zinc-500">
+              <Film className="h-10 w-10 mx-auto mb-3 opacity-30 text-zinc-400" />
+              <p className="text-sm font-semibold text-zinc-300 mb-1">
+                {searchQuery ? "No matching projects found" : "No saved projects in vault"}
+              </p>
+              <p className="text-xs text-zinc-500 max-w-xs mx-auto leading-relaxed">
+                {searchQuery
+                  ? "Try searching for a different video title."
+                  : "Upload a video clip and click 'Save Draft' to persist your EDL revisions here."}
+              </p>
             </div>
           ) : (
             filteredProjects.map((p) => {

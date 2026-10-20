@@ -24,7 +24,6 @@ import {
   extractVideoMetadata,
   detectFillerWords,
   formatTimecode,
-  createSampleDemoVideoFile,
 } from "@/lib/studio-utils";
 import {
   Sparkles,
@@ -35,47 +34,20 @@ import {
   FolderOpen,
   ArrowRight,
   ShieldCheck,
+  FileVideo,
 } from "lucide-react";
-
-// Default demo transcript words for immediate zero-config testing
-const INITIAL_DEMO_WORDS: StudioWord[] = [
-  { id: "w-0", word: "Hey", start: 0.1, end: 0.35, isFiller: false, deleted: false },
-  { id: "w-1", word: "everyone!", start: 0.4, end: 0.85, isFiller: false, deleted: false },
-  { id: "w-2", word: "Stop", start: 0.95, end: 1.25, isFiller: false, deleted: false },
-  { id: "w-3", word: "scrolling", start: 1.3, end: 1.75, isFiller: false, deleted: false },
-  { id: "w-4", word: "right", start: 1.8, end: 2.05, isFiller: false, deleted: false },
-  { id: "w-5", word: "now", start: 2.1, end: 2.45, isFiller: false, deleted: false },
-  { id: "w-6", word: "um", start: 2.5, end: 2.75, isFiller: true, deleted: false },
-  { id: "w-7", word: "because", start: 2.8, end: 3.15, isFiller: false, deleted: false },
-  { id: "w-8", word: "this", start: 3.2, end: 3.45, isFiller: false, deleted: false },
-  { id: "w-9", word: "AI", start: 3.5, end: 3.75, isFiller: false, deleted: false },
-  { id: "w-10", word: "video", start: 3.8, end: 4.15, isFiller: false, deleted: false },
-  { id: "w-11", word: "editor", start: 4.2, end: 4.65, isFiller: false, deleted: false },
-  { id: "w-12", word: "is", start: 4.7, end: 4.9, isFiller: false, deleted: false },
-  { id: "w-13", word: "basically", start: 4.95, end: 5.35, isFiller: true, deleted: false },
-  { id: "w-14", word: "changing", start: 5.4, end: 5.85, isFiller: false, deleted: false },
-  { id: "w-15", word: "how", start: 5.9, end: 6.1, isFiller: false, deleted: false },
-  { id: "w-16", word: "you", start: 6.15, end: 6.35, isFiller: false, deleted: false },
-  { id: "w-17", word: "make", start: 6.4, end: 6.65, isFiller: false, deleted: false },
-  { id: "w-18", word: "Reels", start: 6.7, end: 7.15, isFiller: false, deleted: false },
-  { id: "w-19", word: "forever.", start: 7.2, end: 7.8, isFiller: false, deleted: false },
-  { id: "w-20", word: "No", start: 8.0, end: 8.25, isFiller: false, deleted: false },
-  { id: "w-21", word: "VPN,", start: 8.3, end: 8.7, isFiller: false, deleted: false },
-  { id: "w-22", word: "viral", start: 8.8, end: 9.15, isFiller: false, deleted: false },
-  { id: "w-23", word: "in", start: 9.2, end: 9.35, isFiller: false, deleted: false },
-  { id: "w-24", word: "60s!", start: 9.4, end: 9.8, isFiller: false, deleted: false },
-];
 
 export default function StudioPage() {
   const [mounted, setMounted] = useState(false);
 
   // Project state
-  const [projectName, setProjectName] = useState("synth_reel_v3.mp4");
-  const [activeProjectId, setActiveProjectId] = useState<string>("proj-1");
+  const [projectName, setProjectName] = useState("Untitled Project");
+  const [activeProjectId, setActiveProjectId] = useState<string>("");
   const [aspectRatio, setAspectRatio] = useState<AspectRatioMode>("9:16");
   const [activeTab, setActiveTab] = useState<StudioTab>("transcript");
   const [activityRailTab, setActivityRailTab] = useState<ActivityRailTab>("subtitles");
   const [isVaultOpen, setIsVaultOpen] = useState(false);
+  const [vaultProjects, setVaultProjects] = useState<ProjectVaultItem[]>([]);
 
   // Subtitle & Style settings
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("hormozi");
@@ -88,7 +60,7 @@ export default function StudioPage() {
 
   // Playback state
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(9.8);
+  const [duration, setDuration] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -103,16 +75,53 @@ export default function StudioPage() {
     progress: 0,
   });
 
-  const [words, setWords] = useState<StudioWord[]>(INITIAL_DEMO_WORDS);
+  const [words, setWords] = useState<StudioWord[]>([]);
   const [timelineCuts, setTimelineCuts] = useState<TimelineCut[]>([]);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
-  const [lastSavedText, setLastSavedText] = useState("2s ago");
+  const [lastSavedText, setLastSavedText] = useState("Not saved");
   const [copilotFeedback, setCopilotFeedback] = useState<string | null>(null);
-  const [isCreatingDemo, setIsCreatingDemo] = useState(false);
+
+  // Load user's real projects from Supabase Vault
+  const loadVaultProjects = useCallback(async () => {
+    try {
+      const res = await fetch("/api/projects");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.projects && Array.isArray(data.projects)) {
+          const mapped: ProjectVaultItem[] = data.projects.map((p: {
+            id: string;
+            title?: string;
+            updated_at?: string;
+            created_at?: string;
+            aspect_ratio?: AspectRatioMode;
+            duration_seconds?: number;
+            status?: "Draft" | "Exported" | "Ready";
+            transcripts?: { transcript_text?: string }[];
+            raw_video_s3_key?: string;
+          }) => ({
+            id: p.id,
+            title: p.title || "Untitled Project",
+            updatedAt: p.updated_at ? new Date(p.updated_at).toLocaleDateString() : "Recently",
+            aspectRatio: (p.aspect_ratio as AspectRatioMode) || "9:16",
+            duration: p.duration_seconds || 0,
+            retentionScore: 95,
+            status: p.status === "Ready" ? "Ready" : "Draft",
+            thumbnailGradient: "from-violet-900/60 via-purple-900/40 to-black",
+            wordCount: p.transcripts?.[0]?.transcript_text?.split(/\s+/).length || 0,
+            s3Key: p.raw_video_s3_key,
+          }));
+          setVaultProjects(mapped);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not load vault projects:", e);
+    }
+  }, []);
 
   useEffect(() => {
     setMounted(true);
-  }, []);
+    loadVaultProjects();
+  }, [loadVaultProjects]);
 
   // Clean up object URLs on unmount or video change
   useEffect(() => {
@@ -153,12 +162,12 @@ export default function StudioPage() {
     runTranscription(file);
   }, []);
 
-  // S3 Ingest Process
+  // S3 Ingest Process with true XMLHttpRequest percentage progress
   const runS3Upload = async (file: File) => {
     setAutoSaveStatus("saving");
     setS3State({
       status: "requesting_url",
-      progress: 10,
+      progress: 5,
       totalBytes: file.size,
       bytesUploaded: 0,
     });
@@ -177,16 +186,62 @@ export default function StudioPage() {
       if (!res.ok) throw new Error(data.error || "Failed to request upload URL");
 
       setS3State({
-        status: "completed",
-        progress: 100,
-        fileKey: data.fileKey || `mock/uploads/${Date.now()}-${file.name}`,
-        bucket: data.bucket || "vibecut-media-mock",
+        status: "uploading",
+        progress: 10,
+        fileKey: data.fileKey,
+        bucket: data.bucket,
         totalBytes: file.size,
-        bytesUploaded: file.size,
-        isMock: Boolean(data.isMock),
+        bytesUploaded: 0,
       });
-      setAutoSaveStatus("saved");
-      setLastSavedText("Just now");
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", data.uploadUrl, true);
+      xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
+
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable) {
+          const pct = Math.min(99, Math.round((evt.loaded / evt.total) * 100));
+          setS3State((prev) => ({
+            ...prev,
+            status: "uploading",
+            progress: pct,
+            bytesUploaded: evt.loaded,
+            totalBytes: evt.total,
+          }));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setS3State({
+            status: "completed",
+            progress: 100,
+            fileKey: data.fileKey,
+            bucket: data.bucket,
+            totalBytes: file.size,
+            bytesUploaded: file.size,
+          });
+          setAutoSaveStatus("saved");
+          setLastSavedText("Just now");
+          showToast("Video backed up to AWS S3!");
+        } else {
+          setS3State({
+            status: "error",
+            progress: 0,
+            errorMessage: `S3 upload returned HTTP ${xhr.status}`,
+          });
+        }
+      };
+
+      xhr.onerror = () => {
+        setS3State({
+          status: "error",
+          progress: 0,
+          errorMessage: "Network error during S3 upload",
+        });
+      };
+
+      xhr.send(file);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "S3 upload failed";
       setS3State({ status: "error", progress: 0, errorMessage: msg });
@@ -214,41 +269,32 @@ export default function StudioPage() {
       if (!res.ok) throw new Error(data.error || "Groq transcription failed");
 
       const studioWords = detectFillerWords(data.words || []);
-      setWords(studioWords.length > 0 ? studioWords : INITIAL_DEMO_WORDS);
+      setWords(studioWords);
 
       setTranscriptionState({
         status: "completed",
         progress: 100,
         result: data,
-        isMock: Boolean(data.isMock),
+        isMock: false,
         language: data.language,
         duration: data.duration,
       });
-    } catch (err: unknown) {
-      console.warn("Transcription fallback to demo words:", err);
-      setWords(INITIAL_DEMO_WORDS);
-      setTranscriptionState({
-        status: "completed",
-        progress: 100,
-        isMock: true,
-      });
-    }
-  };
 
-  // 1-Click Load In-Memory Demo Reel (Instant Zero Setup testing)
-  const handleLoadDemoReel = async () => {
-    setIsCreatingDemo(true);
-    try {
-      const demoFile = await createSampleDemoVideoFile();
-      await handleVideoSelected(demoFile);
-      setWords(INITIAL_DEMO_WORDS);
-      setDuration(9.8);
-      setProjectName("synth_reel_v3.mp4");
-      showToast("Demo Reel Loaded with Word-Synced Subtitles!");
-    } catch (e) {
-      console.error("Demo reel error:", e);
-    } finally {
-      setIsCreatingDemo(false);
+      if (studioWords.length > 0) {
+        showToast(`Transcribed ${studioWords.length} words via Whisper-v3!`);
+      } else {
+        showToast("Audio processed. No speech detected in track.");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Transcription failed";
+      console.error("Transcription error:", err);
+      setWords([]);
+      setTranscriptionState({
+        status: "error",
+        progress: 0,
+        errorMessage: msg,
+      });
+      showToast(`Transcription note: ${msg}`);
     }
   };
 
@@ -264,10 +310,11 @@ export default function StudioPage() {
     setTimelineCuts([]);
     setCurrentTime(0);
     setDuration(0);
-    setProjectName("untitled_reel.mp4");
+    setProjectName("Untitled Project");
+    setActiveProjectId("");
     setS3State({ status: "idle", progress: 0 });
     setTranscriptionState({ status: "idle", progress: 0 });
-    showToast("Canvas reset. Import media to begin.");
+    showToast("Canvas reset. Drop a video to begin.");
   };
 
   // Seek video when user clicks on a transcript word or timeline
@@ -367,13 +414,58 @@ export default function StudioPage() {
 
   const effectiveDuration = Math.max(0, duration - totalCutDuration);
 
-  // Project Vault Selection
-  const handleSelectVaultProject = (item: ProjectVaultItem) => {
+  // Dynamic silence count based on real pauses (>= 0.5s) in transcript
+  const silenceCount = useMemo(() => {
+    if (!words || words.length < 2) return 0;
+    let count = 0;
+    for (let i = 0; i < words.length - 1; i++) {
+      if (words[i + 1].start - words[i].end >= 0.5) {
+        count++;
+      }
+    }
+    return count;
+  }, [words]);
+
+  // Project Vault Selection - loads real project details and transcript
+  const handleSelectVaultProject = async (item: ProjectVaultItem) => {
+    try {
+      const res = await fetch(`/api/projects?id=${item.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        const proj = data.project;
+        if (proj) {
+          setProjectName(proj.title || item.title);
+          setActiveProjectId(proj.id);
+          setAspectRatio((proj.aspect_ratio as AspectRatioMode) || item.aspectRatio || "9:16");
+          setDuration(proj.duration_seconds || item.duration || 0);
+
+          const latestEdl = proj.edl_revisions?.[0]?.edl_payload;
+          if (latestEdl) {
+            if (latestEdl.cuts) setTimelineCuts(latestEdl.cuts);
+            if (latestEdl.captionStyle) setCaptionStyle(latestEdl.captionStyle);
+          } else {
+            setTimelineCuts([]);
+          }
+
+          const savedWords = proj.transcripts?.[0]?.words;
+          if (savedWords && Array.isArray(savedWords)) {
+            setWords(savedWords);
+          } else {
+            setWords([]);
+          }
+          showToast(`Loaded "${proj.title}" from vault`);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not load project details:", e);
+    }
+
     setProjectName(item.title);
     setActiveProjectId(item.id);
     setAspectRatio(item.aspectRatio);
     setDuration(item.duration);
-    setWords(INITIAL_DEMO_WORDS);
+    setWords([]);
     showToast(`Loaded "${item.title}" into canvas`);
   };
 
@@ -420,6 +512,7 @@ export default function StudioPage() {
         setAutoSaveStatus("saved");
         setLastSavedText("Just now");
         showToast("Draft & EDL revision saved to cloud vault!");
+        loadVaultProjects();
       } else {
         setAutoSaveStatus("saved");
         setLastSavedText("Just now");
@@ -523,7 +616,7 @@ export default function StudioPage() {
         onExport={() => showToast("Export pipeline queued in 4K 60FPS!")}
         onToggleVault={() => setIsVaultOpen(!isVaultOpen)}
         isVaultOpen={isVaultOpen}
-        projectsCount={4}
+        projectsCount={vaultProjects.length}
         onTriggerUpload={() => fileInputRef.current?.click()}
         onSaveDraft={handleSaveDraft}
         autoSaveStatus={autoSaveStatus}
@@ -534,6 +627,7 @@ export default function StudioPage() {
       <ProjectVaultDrawer
         isOpen={isVaultOpen}
         onClose={() => setIsVaultOpen(false)}
+        projects={vaultProjects}
         onSelectProject={handleSelectVaultProject}
         onCreateBlank={handleResetVideo}
         activeProjectId={activeProjectId}
@@ -553,51 +647,57 @@ export default function StudioPage() {
           {/* Top/Middle Stage: Video Player or Ingestion Dropzone */}
           <div className="flex-1 relative flex items-center justify-center p-3 overflow-hidden bg-radial from-[#121217]/50 to-[#09090b]">
             {!videoSrc ? (
-              /* State A: Blank Stage with Dropzone & 1-Click Demo Reel Button */
-              <div className="flex flex-col items-center justify-center text-center max-w-lg p-6 rounded-2xl bg-[#121217]/80 border border-white/[0.08] shadow-2xl backdrop-blur-md">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-600/20 to-indigo-600/20 border border-violet-500/30 flex items-center justify-center mb-4 shadow-lg shadow-violet-500/10">
-                  <Film className="h-7 w-7 text-violet-400" />
+              /* State A: Blank Stage with Drag-and-Drop Real Video Ingestion */
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    handleVideoSelected(e.dataTransfer.files[0]);
+                  }
+                }}
+                className="w-full max-w-xl mx-auto flex flex-col items-center justify-center text-center p-8 sm:p-12 rounded-3xl bg-[#121217]/90 border-2 border-dashed border-white/10 hover:border-violet-500/50 shadow-2xl backdrop-blur-xl transition-all duration-300 group"
+              >
+                <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-violet-600/20 via-indigo-600/20 to-amber-500/10 border border-violet-500/30 flex items-center justify-center mb-6 shadow-xl shadow-violet-500/10 group-hover:scale-105 group-hover:border-violet-400/60 transition-all duration-300">
+                  <UploadCloud className="h-10 w-10 text-violet-400 group-hover:text-amber-400 transition-colors" />
                 </div>
 
-                <h2 className="text-xl font-black text-white tracking-tight mb-1.5">
-                  Master Cutting Canvas Ready
+                <h2 className="text-2xl font-black text-white tracking-tight mb-2">
+                  Drop Your Real Video Here
                 </h2>
-                <p className="text-xs text-zinc-400 max-w-sm mb-6 leading-relaxed">
-                  Drop any video clip to begin editing, or load our pre-configured creator demo
-                  reel to experience the kinetic caption engine immediately.
+                <p className="text-xs sm:text-sm text-zinc-400 max-w-md mb-8 leading-relaxed">
+                  Drag and drop any raw video file from your computer or browse to import.
+                  Supports <span className="text-zinc-200 font-mono font-semibold">.mp4</span>,{" "}
+                  <span className="text-zinc-200 font-mono font-semibold">.mov</span>, and{" "}
+                  <span className="text-zinc-200 font-mono font-semibold">.webm</span> clips up to 500MB.
                 </p>
 
-                <div className="flex flex-col sm:flex-row items-center gap-3 w-full">
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-xs">
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold shadow-lg shadow-violet-600/30 transition-all cursor-pointer"
+                    className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-full bg-gradient-to-r from-violet-600 via-indigo-600 to-violet-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold shadow-xl shadow-violet-600/30 transition-all active:scale-95 cursor-pointer"
                   >
-                    <UploadCloud className="h-4 w-4" />
-                    <span>Upload Video File</span>
-                  </button>
-
-                  <button
-                    onClick={handleLoadDemoReel}
-                    disabled={isCreatingDemo}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#1c1c24] hover:bg-[#252530] text-amber-300 border border-amber-400/30 text-xs font-bold transition-all cursor-pointer"
-                  >
-                    {isCreatingDemo ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
-                        <span>Generating Reel...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="h-4 w-4 text-amber-400 fill-amber-400" />
-                        <span>Load Demo Reel (9:16)</span>
-                      </>
-                    )}
+                    <FileVideo className="h-4 w-4" />
+                    <span>Select Video from Device</span>
                   </button>
                 </div>
 
-                <div className="mt-5 flex items-center gap-2 text-[10px] text-zinc-500 font-mono">
-                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>Sub-3s Groq Whisper inference • CapCut & Premiere compatible</span>
+                <div className="mt-8 flex flex-wrap items-center justify-center gap-4 text-[11px] text-zinc-500 font-mono">
+                  <span className="flex items-center gap-1.5">
+                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                    AWS S3 Direct Ingest
+                  </span>
+                  <span>•</span>
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+                    Groq Whisper-v3 Speech AI
+                  </span>
+                  <span>•</span>
+                  <span>All Ratios (9:16, 1:1, 16:9)</span>
                 </div>
               </div>
             ) : (
@@ -627,7 +727,7 @@ export default function StudioPage() {
             onAddSplitCut={handleAddSplitCut}
             onCutSilences={handleAutoCutSilences}
             onResetCuts={handleResetCuts}
-            silenceCount={14}
+            silenceCount={silenceCount}
           />
         </div>
 

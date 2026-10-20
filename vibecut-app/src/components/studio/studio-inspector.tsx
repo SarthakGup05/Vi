@@ -375,8 +375,12 @@ export function StudioInspector({
 
             {/* Word Chips Flow */}
             {words.length === 0 ? (
-              <div className="py-12 text-center text-zinc-500 text-xs">
-                No transcript loaded yet. Import media or click Load Demo!
+              <div className="py-14 text-center text-zinc-500 px-4">
+                <FileText className="h-8 w-8 mx-auto mb-2.5 opacity-30 text-zinc-400" />
+                <p className="text-xs font-semibold text-zinc-300 mb-1">No Spoken Transcript Loaded</p>
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  Import a video with dialogue to see interactive word timestamps, detect filler words, and edit like a doc.
+                </p>
               </div>
             ) : (
               <div className="flex flex-wrap gap-1.5 leading-relaxed pt-1">

@@ -13,7 +13,6 @@ import {
   Layers,
   Film,
 } from "lucide-react";
-import { createSampleDemoVideoFile } from "@/lib/studio-utils";
 
 interface VideoDropzoneProps {
   onVideoSelected: (file: File) => void;
@@ -22,7 +21,6 @@ interface VideoDropzoneProps {
 
 export function VideoDropzone({ onVideoSelected, isProcessing = false }: VideoDropzoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
-  const [isGeneratingDemo, setIsGeneratingDemo] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -72,19 +70,6 @@ export function VideoDropzone({ onVideoSelected, isProcessing = false }: VideoDr
   const handleFileInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       validateAndSelect(e.target.files[0]);
-    }
-  };
-
-  const handleLoadDemo = async () => {
-    try {
-      setIsGeneratingDemo(true);
-      const demoFile = await createSampleDemoVideoFile();
-      onVideoSelected(demoFile);
-    } catch (err) {
-      console.error("Failed to generate demo reel:", err);
-      setValidationError("Could not generate demo video. Please choose a local file.");
-    } finally {
-      setIsGeneratingDemo(false);
     }
   };
 
@@ -154,22 +139,6 @@ export function VideoDropzone({ onVideoSelected, isProcessing = false }: VideoDr
             >
               <FileVideo className="h-4 w-4" />
               <span>Select Video File</span>
-            </button>
-
-            {/* Instant Demo Reel Generator Button */}
-            <button
-              type="button"
-              disabled={isGeneratingDemo || isProcessing}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleLoadDemo();
-              }}
-              className="px-5 py-3 rounded-full bg-zinc-900 border border-amber-400/40 hover:border-amber-400 text-amber-300 font-semibold text-sm hover:bg-amber-400/10 transition-all active:scale-95 cursor-pointer flex items-center gap-2 shadow-sm disabled:opacity-60"
-            >
-              <Zap className="h-4 w-4 text-amber-400 fill-amber-400" />
-              <span>
-                {isGeneratingDemo ? "Synthesizing Demo Reel..." : "Load Sample Demo Reel (9.8s)"}
-              </span>
             </button>
           </div>
 
