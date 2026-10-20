@@ -1,0 +1,15 @@
+export { Navbar } from "./navbar";
+export { HeroSection } from "./hero-section";
+export { StudioStage } from "./studio-stage";
+export { PlatformsStrip } from "./platforms-strip";
+export { DualFormatSection } from "./dual-format-section";
+export { ScriptTrimmerSection } from "./script-trimmer-section";
+export { CreatorCategoriesSection } from "./creator-categories-section";
+export { FeatureMatrixSection } from "./feature-matrix-section";
+export { WallOfFameSection } from "./wall-of-fame-section";
+export { PricingSection } from "./pricing-section";
+export { FaqSection } from "./faq-section";
+export { CtaBannerSection } from "./cta-banner-section";
+export { Footer } from "./footer";
+export { UpiCheckoutModal } from "./modals/upi-checkout-modal";
+export { DemoVideoModal } from "./modals/demo-video-modal";
