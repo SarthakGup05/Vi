@@ -23,9 +23,28 @@ import {
   Bell,
   Trash2,
   ShieldCheck,
+  Smile,
+  Layers,
+  Palette,
+  MoveVertical,
 } from "lucide-react";
-import { StudioWord, CaptionStyle, StudioTab, TimelineCut, SilenceGap } from "@/types/studio";
+import {
+  StudioWord,
+  CaptionStyle,
+  StudioTab,
+  TimelineCut,
+  SilenceGap,
+  CaptionPosition,
+  CaptionFontSize,
+  CaptionSettings,
+  WordsPerLine,
+  CAPTION_HIGHLIGHT_COLORS,
+} from "@/types/studio";
 import { formatTimecode, detectSilenceGaps } from "@/lib/studio-utils";
+import {
+  CREATOR_HIGHLIGHT_COLORS,
+  DEFAULT_CAPTION_SETTINGS,
+} from "@/lib/caption-engine";
 
 interface StudioInspectorProps {
   activeTab: StudioTab;
@@ -44,8 +63,18 @@ interface StudioInspectorProps {
   onRestoreAllSilences?: () => void;
   silenceThreshold?: number;
   onSilenceThresholdChange?: (val: number) => void;
-  captionStyle: CaptionStyle;
-  onCaptionStyleChange: (style: CaptionStyle) => void;
+  captionStyle?: CaptionStyle;
+  onCaptionStyleChange?: (style: CaptionStyle) => void;
+  captionSettings?: CaptionSettings;
+  onCaptionSettingsChange?: (settings: CaptionSettings) => void;
+  captionPosition?: CaptionPosition;
+  onCaptionPositionChange?: (position: CaptionPosition) => void;
+  wordsPerLine?: number;
+  onWordsPerLineChange?: (words: number) => void;
+  highlightColor?: string;
+  onHighlightColorChange?: (color: string) => void;
+  autoEmoji?: boolean;
+  onAutoEmojiChange?: (enabled: boolean) => void;
   onExecuteCopilotPrompt: (prompt: string) => void;
   copilotFeedback?: string | null;
 }
@@ -69,12 +98,101 @@ export function StudioInspector({
   onSilenceThresholdChange,
   captionStyle,
   onCaptionStyleChange,
+  captionSettings: propCaptionSettings,
+  onCaptionSettingsChange,
+  captionPosition: propCaptionPosition,
+  onCaptionPositionChange,
+  wordsPerLine: propWordsPerLine,
+  onWordsPerLineChange,
+  highlightColor: propHighlightColor,
+  onHighlightColorChange,
+  autoEmoji: propAutoEmoji,
+  onAutoEmojiChange,
   onExecuteCopilotPrompt,
   copilotFeedback,
 }: StudioInspectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [copilotInput, setCopilotInput] = useState("");
   const [isCopilotThinking, setIsCopilotThinking] = useState(false);
+
+  // Unified Caption Settings state management
+  const [localSettings, setLocalSettings] = useState<CaptionSettings>(() => ({
+    ...DEFAULT_CAPTION_SETTINGS,
+    style: captionStyle || "hormozi",
+    position: propCaptionPosition || DEFAULT_CAPTION_SETTINGS.position,
+    wordsPerLine: propWordsPerLine || DEFAULT_CAPTION_SETTINGS.wordsPerLine,
+    highlightColor: propHighlightColor || DEFAULT_CAPTION_SETTINGS.highlightColor,
+    autoEmoji: propAutoEmoji !== undefined ? propAutoEmoji : DEFAULT_CAPTION_SETTINGS.autoEmoji,
+  }));
+
+  const activeCaptionSettings: CaptionSettings = useMemo(() => {
+    if (propCaptionSettings) return propCaptionSettings;
+    return {
+      style: captionStyle || localSettings.style,
+      autoEmoji: propAutoEmoji !== undefined ? propAutoEmoji : localSettings.autoEmoji,
+      wordsPerLine: propWordsPerLine !== undefined ? propWordsPerLine : localSettings.wordsPerLine,
+      position: propCaptionPosition || localSettings.position,
+      highlightColor: propHighlightColor || localSettings.highlightColor,
+      fontSize: localSettings.fontSize,
+    };
+  }, [
+    propCaptionSettings,
+    captionStyle,
+    localSettings,
+    propAutoEmoji,
+    propWordsPerLine,
+    propCaptionPosition,
+    propHighlightColor,
+  ]);
+
+  const updateCaptionSettings = (updates: Partial<CaptionSettings>) => {
+    const next: CaptionSettings = {
+      ...activeCaptionSettings,
+      ...updates,
+    };
+    setLocalSettings(next);
+    onCaptionSettingsChange?.(next);
+    if (updates.style && onCaptionStyleChange) {
+      onCaptionStyleChange(updates.style);
+    }
+    if (updates.position && onCaptionPositionChange) {
+      onCaptionPositionChange(updates.position);
+    }
+    if (updates.wordsPerLine !== undefined && onWordsPerLineChange) {
+      onWordsPerLineChange(updates.wordsPerLine);
+    }
+    if (updates.highlightColor && onHighlightColorChange) {
+      onHighlightColorChange(updates.highlightColor);
+    }
+    if (updates.autoEmoji !== undefined && onAutoEmojiChange) {
+      onAutoEmojiChange(updates.autoEmoji);
+    }
+  };
+
+
+
+  const currentCaptionStyle = activeCaptionSettings.style;
+  const currentAutoEmoji = activeCaptionSettings.autoEmoji;
+  const currentWordsPerLine = activeCaptionSettings.wordsPerLine;
+  const currentCaptionPosition = activeCaptionSettings.position;
+  const currentHighlightColor = activeCaptionSettings.highlightColor;
+  const currentFontSize = activeCaptionSettings.fontSize;
+
+  const handleCaptionStyleChange = (style: CaptionStyle) => {
+    updateCaptionSettings({ style });
+  };
+  const handleAutoEmojiChange = (val: boolean) => {
+    updateCaptionSettings({ autoEmoji: val });
+  };
+  const handleWordsPerLineChange = (w: WordsPerLine) => {
+    updateCaptionSettings({ wordsPerLine: w });
+  };
+  const handleCaptionPositionChange = (pos: CaptionPosition) => {
+    updateCaptionSettings({ position: pos });
+  };
+  const handleHighlightColorChange = (c: string) => {
+    updateCaptionSettings({ highlightColor: c });
+  };
 
   // Selection states for Doc-style range editing
   const [selectedWordIds, setSelectedWordIds] = useState<Set<string>>(new Set());
@@ -472,95 +590,371 @@ export function StudioInspector({
           </div>
         )}
 
-        {/* TAB 2: CAPTIONS & STYLES */}
+        {/* TAB 2: CAPTIONS & STYLES (F05: Kinetic Captions & Contextual Auto-Emoji Engine) */}
         {activeTab === "captions" && (
           <div className="flex flex-col gap-4">
+            {/* 1. Kinetic Preset Styles (5 Presets) */}
             <div>
-              <h3 className="text-xs font-bold text-white mb-2">Kinetic Preset Styles</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                  Kinetic Preset Styles
+                </h3>
+                <span className="text-[10px] font-mono font-semibold text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded">
+                  5 Presets
+                </span>
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
-                {/* Hormozi Style */}
+                {/* 1. Hormozi Gold */}
                 <button
-                  onClick={() => onCaptionStyleChange("hormozi")}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                    captionStyle === "hormozi"
-                      ? "bg-amber-500/15 border-amber-400/50 shadow-md shadow-amber-500/10"
+                  onClick={() => handleCaptionStyleChange("hormozi")}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                    currentCaptionStyle === "hormozi"
+                      ? "bg-amber-500/15 border-amber-400/60 shadow-lg shadow-amber-500/10 ring-1 ring-amber-400/40"
                       : "bg-[#181820] hover:bg-[#20202a] border-white/5"
                   }`}
                 >
-                  <div className="text-[11px] font-bold text-amber-300 uppercase tracking-wider mb-1">
-                    ⚡ Hormozi Gold
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1">
+                      <span>⚡</span> Hormozi Gold
+                    </span>
+                    {currentCaptionStyle === "hormozi" && <Check className="h-3 w-3 text-amber-400" />}
                   </div>
-                  <div className="text-sm font-black text-white bg-black/50 p-1.5 rounded text-center">
-                    VIRAL <span className="text-[#FACC15]">REEL</span>
+                  <div className="text-xs font-black text-white bg-black/70 p-1.5 rounded-md text-center border border-white/10">
+                    VIRAL <span className="text-[#FACC15] drop-shadow-[0_0_8px_rgba(250,204,21,0.8)]">REEL</span>
                   </div>
                 </button>
 
-                {/* MrBeast Yellow */}
+                {/* 2. Beast Box */}
                 <button
-                  onClick={() => onCaptionStyleChange("beast")}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                    captionStyle === "beast"
-                      ? "bg-amber-500/15 border-amber-400/50 shadow-md shadow-amber-500/10"
+                  onClick={() => handleCaptionStyleChange("beast")}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                    currentCaptionStyle === "beast"
+                      ? "bg-amber-500/15 border-amber-400/60 shadow-lg shadow-amber-500/10 ring-1 ring-amber-400/40"
                       : "bg-[#181820] hover:bg-[#20202a] border-white/5"
                   }`}
                 >
-                  <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wider mb-1">
-                    🔥 Beast Box
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                      <span>🔥</span> Beast Box
+                    </span>
+                    {currentCaptionStyle === "beast" && <Check className="h-3 w-3 text-amber-400" />}
                   </div>
-                  <div className="text-sm font-black text-zinc-950 bg-[#FACC15] p-1 rounded text-center rotate-[-1deg]">
+                  <div className="text-xs font-black text-zinc-950 bg-[#FACC15] p-1 rounded text-center rotate-[-1deg] shadow-sm">
                     INSANE POP
                   </div>
                 </button>
 
-                {/* Cyber Neon Cyan */}
+                {/* 3. Cyber Cyan */}
                 <button
-                  onClick={() => onCaptionStyleChange("cyber")}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                    captionStyle === "cyber"
-                      ? "bg-cyan-500/15 border-cyan-400/50 shadow-md shadow-cyan-500/10"
+                  onClick={() => handleCaptionStyleChange("cyber")}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                    currentCaptionStyle === "cyber"
+                      ? "bg-cyan-500/15 border-cyan-400/60 shadow-lg shadow-cyan-500/10 ring-1 ring-cyan-400/40"
                       : "bg-[#181820] hover:bg-[#20202a] border-white/5"
                   }`}
                 >
-                  <div className="text-[11px] font-bold text-cyan-300 uppercase tracking-wider mb-1">
-                    🌐 Cyber Cyan
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1">
+                      <span>🌐</span> Cyber Cyan
+                    </span>
+                    {currentCaptionStyle === "cyber" && <Check className="h-3 w-3 text-cyan-400" />}
                   </div>
-                  <div className="text-sm font-black text-[#38BDF8] bg-black/50 p-1.5 rounded text-center">
+                  <div className="text-xs font-black text-[#38BDF8] bg-black/70 p-1.5 rounded-md text-center border border-cyan-500/30 drop-shadow-[0_0_8px_rgba(56,189,248,0.7)]">
                     TECH GLOW
                   </div>
                 </button>
 
-                {/* Clean Minimalist */}
+                {/* 4. Clean Vox */}
                 <button
-                  onClick={() => onCaptionStyleChange("clean")}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                    captionStyle === "clean"
-                      ? "bg-violet-500/15 border-violet-400/50 shadow-md shadow-violet-500/10"
+                  onClick={() => handleCaptionStyleChange("clean")}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                    currentCaptionStyle === "clean"
+                      ? "bg-violet-500/15 border-violet-400/60 shadow-lg shadow-violet-500/10 ring-1 ring-violet-400/40"
                       : "bg-[#181820] hover:bg-[#20202a] border-white/5"
                   }`}
                 >
-                  <div className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider mb-1">
-                    ✨ Minimalist
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-1">
+                      <span>✨</span> Clean Vox
+                    </span>
+                    {currentCaptionStyle === "clean" && <Check className="h-3 w-3 text-violet-400" />}
                   </div>
-                  <div className="text-sm font-bold text-white bg-black/50 p-1.5 rounded text-center">
-                    Clean Subtitle
+                  <div className="text-xs font-semibold text-white bg-black/60 p-1.5 rounded-md text-center border border-white/10">
+                    Documentary
+                  </div>
+                </button>
+
+                {/* 5. Crimson Viral */}
+                <button
+                  onClick={() => handleCaptionStyleChange("crimson")}
+                  className={`col-span-2 p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                    currentCaptionStyle === "crimson"
+                      ? "bg-rose-500/15 border-rose-400/60 shadow-lg shadow-rose-500/10 ring-1 ring-rose-400/40"
+                      : "bg-[#181820] hover:bg-[#20202a] border-white/5"
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-400 uppercase tracking-wider mb-0.5">
+                      <span>💥</span> Crimson Viral
+                    </div>
+                    <span className="text-[10px] text-zinc-400">High-CTR alert hook for explosive engagement</span>
+                  </div>
+                  <div className="text-xs font-black text-rose-300 bg-rose-950/80 px-2.5 py-1 rounded border border-rose-500/50 rotate-[1deg] drop-shadow-[0_0_10px_rgba(244,63,94,0.7)]">
+                    ALERT 💥
                   </div>
                 </button>
               </div>
             </div>
 
-            {/* Typography Tuning */}
-            <div className="p-3 rounded-xl bg-[#181820] border border-white/5 space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-zinc-400 font-medium">Auto-Emphasize Hooks</span>
-                <span className="text-[10px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded">
-                  Active
+            {/* 2. Contextual Auto-Emoji Engine */}
+            <div className="p-3.5 rounded-xl bg-[#181820] border border-white/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400">
+                    <Smile className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                      Auto-Emoji Engine
+                    </h4>
+                    <span className="text-[10px] text-zinc-400">
+                      Contextual emotion triggers above active words
+                    </span>
+                  </div>
+                </div>
+
+                {/* Toggle switch with live radar indicator */}
+                <button
+                  onClick={() => handleAutoEmojiChange(!currentAutoEmoji)}
+                  className={`flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer border ${
+                    currentAutoEmoji
+                      ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-sm shadow-emerald-500/20"
+                      : "bg-zinc-800/80 border-zinc-700/60 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  {currentAutoEmoji && (
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                  )}
+                  <span>{currentAutoEmoji ? "Active" : "Disabled"}</span>
+                </button>
+              </div>
+
+              {/* Live Keyword Empathy Preview */}
+              <div className="bg-[#121217] p-2.5 rounded-lg border border-white/5 flex items-center justify-between text-[11px]">
+                <span className="text-zinc-400 font-medium">Mapped Triggers:</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="px-1.5 py-0.5 rounded bg-zinc-800/80 text-zinc-200 text-[10px] font-mono">
+                    🔥 Fire
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-zinc-800/80 text-zinc-200 text-[10px] font-mono">
+                    💰 Cash
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-zinc-800/80 text-zinc-200 text-[10px] font-mono">
+                    🚀 Moon
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-zinc-800/80 text-zinc-200 text-[10px] font-mono">
+                    💡 Idea
+                  </span>
+                  <span className="text-[10px] text-amber-400 font-bold">+50</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Words Per Line Chunk Selector */}
+            <div className="p-3.5 rounded-xl bg-[#181820] border border-white/5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Layers className="h-3.5 w-3.5 text-violet-400" />
+                  Words Per Line
+                </span>
+                <span className="text-[10px] font-mono font-bold text-violet-300 bg-violet-500/10 px-2 py-0.5 rounded border border-violet-500/20">
+                  {currentWordsPerLine === 1 ? "1 Word Chunk" : currentWordsPerLine === 3 ? "2-3 Words Chunk" : "4-5 Words Chunk"}
                 </span>
               </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-zinc-400 font-medium">Words Per Line</span>
-                <span className="text-[10px] font-mono text-zinc-300 bg-zinc-800 px-2 py-0.5 rounded">
-                  3 - 4 words
+
+              <div className="grid grid-cols-3 gap-1.5">
+                {/* 1 word: TikTok Rapid */}
+                <button
+                  onClick={() => handleWordsPerLineChange(1)}
+                  className={`p-2 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                    currentWordsPerLine === 1
+                      ? "bg-violet-600/20 border-violet-500/60 text-white shadow-sm"
+                      : "bg-[#121217] border-white/5 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <span className="text-xs font-bold">1 Word</span>
+                  <span className="text-[9px] text-amber-300 font-medium">TikTok Rapid</span>
+                </button>
+
+                {/* 2-3 words: Punchy */}
+                <button
+                  onClick={() => handleWordsPerLineChange(3)}
+                  className={`p-2 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                    currentWordsPerLine === 3
+                      ? "bg-violet-600/20 border-violet-500/60 text-white shadow-sm"
+                      : "bg-[#121217] border-white/5 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <span className="text-xs font-bold">2 - 3 Words</span>
+                  <span className="text-[9px] text-emerald-400 font-medium">Punchy 🔥</span>
+                </button>
+
+                {/* 4-5 words: Standard */}
+                <button
+                  onClick={() => handleWordsPerLineChange(5)}
+                  className={`p-2 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                    currentWordsPerLine === 5
+                      ? "bg-violet-600/20 border-violet-500/60 text-white shadow-sm"
+                      : "bg-[#121217] border-white/5 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <span className="text-xs font-bold">4 - 5 Words</span>
+                  <span className="text-[9px] text-zinc-400 font-medium">Standard</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 4. Position Selector */}
+            <div className="p-3.5 rounded-xl bg-[#181820] border border-white/5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <MoveVertical className="h-3.5 w-3.5 text-cyan-400" />
+                  Position Safe Zone
                 </span>
+                <span className="text-[10px] font-mono text-zinc-400 bg-zinc-800/80 px-2 py-0.5 rounded">
+                  Reels & Shorts Safe
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5">
+                {/* Top: Headline */}
+                <button
+                  onClick={() => handleCaptionPositionChange("top")}
+                  className={`p-2 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                    currentCaptionPosition === "top"
+                      ? "bg-cyan-600/20 border-cyan-500/60 text-white shadow-sm"
+                      : "bg-[#121217] border-white/5 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <span className="text-xs font-bold">Top</span>
+                  <span className="text-[9px] text-zinc-400">Headline</span>
+                </button>
+
+                {/* Center: Safe Zone */}
+                <button
+                  onClick={() => handleCaptionPositionChange("center")}
+                  className={`p-2 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                    currentCaptionPosition === "center"
+                      ? "bg-cyan-600/20 border-cyan-500/60 text-white shadow-sm"
+                      : "bg-[#121217] border-white/5 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <span className="text-xs font-bold">Center</span>
+                  <span className="text-[9px] text-emerald-300 font-semibold">Safe Zone ✨</span>
+                </button>
+
+                {/* Bottom: Classic */}
+                <button
+                  onClick={() => handleCaptionPositionChange("bottom")}
+                  className={`p-2 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                    currentCaptionPosition === "bottom"
+                      ? "bg-cyan-600/20 border-cyan-500/60 text-white shadow-sm"
+                      : "bg-[#121217] border-white/5 text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <span className="text-xs font-bold">Bottom</span>
+                  <span className="text-[9px] text-zinc-400">Classic</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 5. Highlight Color Palette Picker */}
+            <div className="p-3.5 rounded-xl bg-[#181820] border border-white/5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Palette className="h-3.5 w-3.5 text-pink-400" />
+                  Active Highlight Color
+                </span>
+                <span className="text-[10px] font-mono text-zinc-300 uppercase bg-zinc-800/80 px-2 py-0.5 rounded">
+                  {currentHighlightColor}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-4 gap-2">
+                {CAPTION_HIGHLIGHT_COLORS.map((c) => {
+                  const isActive = currentHighlightColor.toLowerCase() === c.hex.toLowerCase();
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => handleHighlightColorChange(c.hex)}
+                      className={`p-2 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-1.5 ${
+                        isActive
+                          ? "bg-white/10 border-white/40 ring-2 ring-offset-2 ring-offset-[#181820] ring-white/60 shadow-md"
+                          : "bg-[#121217] border-white/5 hover:border-white/20"
+                      }`}
+                    >
+                      <div
+                        className="w-6 h-6 rounded-full shadow-sm flex items-center justify-center transition-transform hover:scale-110"
+                        style={{ backgroundColor: c.hex }}
+                      >
+                        {isActive && (
+                          <Check
+                            className={`h-3.5 w-3.5 ${
+                              c.id === "gold" ? "text-zinc-950 font-bold" : "text-white font-bold"
+                            }`}
+                          />
+                        )}
+                      </div>
+                      <span className="text-[10px] font-semibold text-zinc-300 leading-tight">
+                        {c.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 6. Kinetic Font Size */}
+            <div className="p-3.5 rounded-xl bg-[#181820] border border-white/5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Type className="h-3.5 w-3.5 text-violet-400" />
+                  Font Scale & Impact
+                </span>
+                <span className="text-[10px] font-mono font-bold text-violet-300 uppercase bg-violet-500/10 px-2 py-0.5 rounded border border-violet-500/20">
+                  {activeCaptionSettings.fontSize || "lg"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-4 gap-1.5">
+                {(["sm", "md", "lg", "xl"] as const).map((size) => {
+                  const isActive = (activeCaptionSettings.fontSize || "lg") === size;
+                  const labelMap = {
+                    sm: "Compact",
+                    md: "Clean",
+                    lg: "Viral",
+                    xl: "Max Pop",
+                  };
+                  return (
+                    <button
+                      key={size}
+                      onClick={() => updateCaptionSettings({ fontSize: size })}
+                      className={`p-2 rounded-lg border text-center transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                        isActive
+                          ? "bg-violet-600/25 border-violet-500/60 text-white shadow-sm ring-1 ring-violet-500/40"
+                          : "bg-[#121217] border-white/5 text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      <span className="text-xs font-bold uppercase">{size}</span>
+                      <span className="text-[9px] text-zinc-400 font-medium">{labelMap[size]}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>

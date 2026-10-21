@@ -24,7 +24,23 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { formatTimecode } from "@/lib/studio-utils";
-import { AspectRatioMode, StudioWord, CaptionStyle, TimelineCut } from "@/types/studio";
+import {
+  AspectRatioMode,
+  StudioWord,
+  CaptionStyle,
+  CaptionPosition,
+  WordsPerLine,
+  CaptionSettings,
+  TimelineCut,
+} from "@/types/studio";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  chunkTranscriptWords,
+  getEmojiForWord,
+  getCaptionPositionClasses,
+  getCaptionFontSizeClasses,
+  DEFAULT_CAPTION_SETTINGS,
+} from "@/lib/caption-engine";
 
 interface VideoPlayerProps {
   src: string;
@@ -35,6 +51,11 @@ interface VideoPlayerProps {
   words?: StudioWord[];
   cuts?: TimelineCut[];
   captionStyle?: CaptionStyle;
+  captionPosition?: CaptionPosition;
+  wordsPerLine?: WordsPerLine;
+  highlightColor?: string;
+  autoEmoji?: boolean;
+  captionSettings?: CaptionSettings;
   showCaptions?: boolean;
   onToggleCaptions?: () => void;
   onAttachLocalFile?: (file: File) => void;
@@ -49,6 +70,11 @@ export function VideoPlayer({
   words = [],
   cuts = [],
   captionStyle = "hormozi",
+  captionPosition = "bottom",
+  wordsPerLine = 3,
+  highlightColor = "#FACC15",
+  autoEmoji = true,
+  captionSettings,
   showCaptions = true,
   onToggleCaptions,
   onAttachLocalFile,
@@ -325,42 +351,36 @@ export function VideoPlayer({
     }
   };
 
-  // Calculate current active kinetic subtitle phrase and active word
+  // Calculate effective caption settings
+  const effectiveCaptionSettings: CaptionSettings = useMemo(() => {
+    return {
+      style: captionSettings?.style || captionStyle || "hormozi",
+      position: captionSettings?.position || captionPosition || "bottom",
+      wordsPerLine: captionSettings?.wordsPerLine || wordsPerLine || 3,
+      highlightColor: captionSettings?.highlightColor || highlightColor || "#FACC15",
+      autoEmoji:
+        captionSettings?.autoEmoji !== undefined
+          ? captionSettings.autoEmoji
+          : autoEmoji !== undefined
+          ? autoEmoji
+          : true,
+      fontSize: captionSettings?.fontSize || "lg",
+    };
+  }, [
+    captionSettings,
+    captionStyle,
+    captionPosition,
+    wordsPerLine,
+    highlightColor,
+    autoEmoji,
+  ]);
+
+  // Calculate current active kinetic subtitle phrase, active word, and contextual emoji
   const currentCaptionGroup = useMemo(() => {
     if (!words || words.length === 0) return null;
-
-    // Find all non-deleted words
-    const activeWords = words.filter((w) => !w.deleted);
-    if (activeWords.length === 0) return null;
-
-    // 1. Find direct active word at currentTime
-    let currentIndex = activeWords.findIndex(
-      (w) => currentTime >= w.start && currentTime <= w.end
-    );
-
-    // 2. If in a brief pause between words, hold the previous word active for up to 0.8s
-    if (currentIndex === -1) {
-      for (let i = activeWords.length - 1; i >= 0; i--) {
-        if (currentTime >= activeWords[i].end && currentTime <= activeWords[i].end + 0.8) {
-          currentIndex = i;
-          break;
-        }
-      }
-    }
-
-    if (currentIndex === -1) {
-      return null;
-    }
-
-    // Create a 3-4 word window centered around current word
-    const CHUNK_SIZE = 4;
-    const startIdx = Math.floor(currentIndex / CHUNK_SIZE) * CHUNK_SIZE;
-    const endIdx = Math.min(startIdx + CHUNK_SIZE, activeWords.length);
-    const phraseWords = activeWords.slice(startIdx, endIdx);
-    const highlightedIndex = phraseWords.findIndex((w) => w.id === activeWords[currentIndex].id);
-
-    return { phraseWords, highlightedIndex };
-  }, [words, currentTime]);
+    const chunkSize = effectiveCaptionSettings.wordsPerLine || 3;
+    return chunkTranscriptWords(words, currentTime, chunkSize);
+  }, [words, currentTime, effectiveCaptionSettings.wordsPerLine]);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -499,65 +519,76 @@ export function VideoPlayer({
           )}
         </div>
 
-        {/* LIVE KINETIC SUBTITLE OVERLAY (Hormozi / Viral Subtitle Engine) */}
+        {/* LIVE KINETIC SUBTITLE OVERLAY (Kinetic Captions & Contextual Auto-Emoji Engine) */}
         {captionsVisible && currentCaptionGroup && currentCaptionGroup.phraseWords.length > 0 && (
           <div
-            className={`absolute z-20 pointer-events-none transition-all duration-100 flex flex-wrap items-center justify-center text-center px-4 max-w-[85%] ${
-              aspectRatio === "9:16" ? "bottom-[22%]" : "bottom-[14%]"
-            }`}
+            className={`absolute z-20 pointer-events-none transition-all duration-150 flex flex-wrap items-center justify-center text-center px-4 max-w-[90%] ${getCaptionPositionClasses(
+              effectiveCaptionSettings.position,
+              aspectRatio
+            )}`}
           >
-            <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+            <div className="relative flex flex-wrap items-center justify-center gap-x-2 gap-y-2.5">
               {currentCaptionGroup.phraseWords.map((wordObj, i) => {
-                const isWordHighlighted = i === currentCaptionGroup.highlightedIndex;
+                const isWordHighlighted = i === currentCaptionGroup.activeIndex;
+                const highlightColor = effectiveCaptionSettings.highlightColor || "#FACC15";
+                const fontSizeClass = getCaptionFontSizeClasses(effectiveCaptionSettings.fontSize);
+                const wordEmoji = effectiveCaptionSettings.autoEmoji
+                  ? getEmojiForWord(wordObj.word)
+                  : null;
+                const showEmojiBadge = isWordHighlighted && wordEmoji;
 
-                if (captionStyle === "cyber") {
-                  return (
-                    <span
-                      key={wordObj.id}
-                      className={`font-black uppercase tracking-wider transition-all duration-100 text-base sm:text-lg drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] ${
-                        isWordHighlighted
-                          ? "text-[#38BDF8] scale-110 drop-shadow-[0_0_12px_rgba(56,189,248,0.8)] font-extrabold"
-                          : "text-white"
-                      }`}
-                      style={{ textShadow: "2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000" }}
-                    >
-                      {wordObj.word}
-                    </span>
-                  );
-                }
-
-                if (captionStyle === "beast") {
-                  return (
-                    <span
-                      key={wordObj.id}
-                      className={`font-black uppercase tracking-tight transition-all duration-100 text-base sm:text-xl drop-shadow-[0_3px_6px_rgba(0,0,0,0.95)] ${
-                        isWordHighlighted
-                          ? "bg-[#FACC15] text-zinc-950 px-1.5 py-0.5 rounded-md scale-115 rotate-[-1deg] shadow-lg shadow-amber-400/50"
-                          : "text-white"
-                      }`}
-                      style={{ textShadow: isWordHighlighted ? "none" : "2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000" }}
-                    >
-                      {wordObj.word}
-                    </span>
-                  );
-                }
-
-                // Default: Hormozi Style
                 return (
-                  <span
-                    key={wordObj.id}
-                    className={`font-black uppercase tracking-wide transition-all duration-100 text-base sm:text-xl drop-shadow-[0_3px_6px_rgba(0,0,0,0.95)] ${
-                      isWordHighlighted
-                        ? "text-[#FACC15] scale-115 font-black drop-shadow-[0_0_16px_rgba(250,204,21,0.9)]"
-                        : "text-white/95"
-                    }`}
-                    style={{
-                      textShadow:
-                        "3px 3px 0 #000, -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 0 3px 0 #000, 0 -3px 0 #000, 3px 0 0 #000, -3px 0 0 #000",
-                    }}
-                  >
-                    {wordObj.word}
-                  </span>
+                  <div key={wordObj.id} className="relative inline-flex flex-col items-center">
+                    {/* Contextual Auto-Emoji Floating Pop Badge */}
+                    <AnimatePresence>
+                      {showEmojiBadge && (
+                        <motion.span
+                          initial={{ opacity: 0, y: 10, scale: 0.3, rotate: -12 }}
+                          animate={{
+                            opacity: 1,
+                            y: effectiveCaptionSettings.wordsPerLine === 1 ? -32 : -28,
+                            scale: [0.3, 1.4, 1.25],
+                            rotate: [-12, 6, 0],
+                          }}
+                          exit={{ opacity: 0, y: -16, scale: 0.5 }}
+                          transition={{ type: "spring", stiffness: 550, damping: 20 }}
+                          className="absolute pointer-events-none text-2xl sm:text-3xl filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)] z-30 select-none"
+                        >
+                          {wordEmoji}
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Word Pop Spring Motion Span */}
+                    <motion.span
+                      layout
+                      animate={{
+                        scale: isWordHighlighted
+                          ? effectiveCaptionSettings.wordsPerLine === 1
+                            ? 1.28
+                            : 1.16
+                          : 1,
+                        y: isWordHighlighted ? -2 : 0,
+                      }}
+                      transition={{
+                        type: "spring",
+                        stiffness: 480,
+                        damping: 24,
+                      }}
+                      className={getWordStyleClasses(
+                        effectiveCaptionSettings.style,
+                        isWordHighlighted,
+                        fontSizeClass
+                      )}
+                      style={getWordCustomStyle(
+                        effectiveCaptionSettings.style,
+                        isWordHighlighted,
+                        highlightColor
+                      )}
+                    >
+                      {wordObj.word}
+                    </motion.span>
+                  </div>
                 );
               })}
             </div>
@@ -727,4 +758,81 @@ export function VideoPlayer({
       </div>
     </div>
   );
+}
+
+function getWordStyleClasses(
+  style: CaptionStyle,
+  isHighlighted: boolean,
+  fontSizeClass: string
+): string {
+  const base = `${fontSizeClass} transition-colors duration-150 select-none`;
+  switch (style) {
+    case "beast":
+      return isHighlighted
+        ? `${base} font-black uppercase tracking-tight text-zinc-950 px-2 py-0.5 rounded-md rotate-[-1.5deg] shadow-xl shadow-black/40`
+        : `${base} font-black uppercase tracking-tight text-white drop-shadow-[0_3px_6px_rgba(0,0,0,0.95)]`;
+    case "cyber":
+      return isHighlighted
+        ? `${base} font-black uppercase tracking-wider drop-shadow-[0_0_14px_rgba(56,189,248,0.85)]`
+        : `${base} font-black uppercase tracking-wider text-white/90 drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]`;
+    case "clean":
+      return isHighlighted
+        ? `${base} font-bold tracking-normal bg-black/60 px-1.5 py-0.5 rounded backdrop-blur-sm shadow-md`
+        : `${base} font-bold tracking-normal text-white/85 bg-black/40 px-1.5 py-0.5 rounded backdrop-blur-xs`;
+    case "crimson":
+      return isHighlighted
+        ? `${base} font-black uppercase tracking-tight drop-shadow-[0_0_18px_rgba(239,68,68,0.9)]`
+        : `${base} font-black uppercase tracking-tight text-white/95 drop-shadow-[0_3px_6px_rgba(0,0,0,0.95)]`;
+    case "hormozi":
+    default:
+      return isHighlighted
+        ? `${base} font-black uppercase tracking-wide drop-shadow-[0_0_16px_rgba(250,204,21,0.9)]`
+        : `${base} font-black uppercase tracking-wide text-white/95 drop-shadow-[0_3px_6px_rgba(0,0,0,0.95)]`;
+  }
+}
+
+function getWordCustomStyle(
+  style: CaptionStyle,
+  isHighlighted: boolean,
+  highlightColor: string
+): React.CSSProperties {
+  if (style === "beast") {
+    if (isHighlighted) {
+      return { backgroundColor: highlightColor };
+    }
+    return {
+      textShadow: "2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000",
+    };
+  }
+
+  if (style === "clean") {
+    if (isHighlighted) {
+      return { color: highlightColor };
+    }
+    return {
+      textShadow: "1px 1px 2px rgba(0,0,0,0.8)",
+    };
+  }
+
+  if (style === "cyber") {
+    return {
+      color: isHighlighted ? highlightColor : "#FFFFFF",
+      textShadow: "2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000",
+    };
+  }
+
+  if (style === "crimson") {
+    return {
+      color: isHighlighted ? highlightColor : "#FFFFFF",
+      textShadow:
+        "3px 3px 0 #000, -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 0 3px 0 #000, 0 -3px 0 #000, 3px 0 0 #000, -3px 0 0 #000, 0 4px 6px rgba(220,38,38,0.5)",
+    };
+  }
+
+  // Hormozi default
+  return {
+    color: isHighlighted ? highlightColor : "#FFFFFF",
+    textShadow:
+      "3px 3px 0 #000, -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 0 3px 0 #000, 0 -3px 0 #000, 3px 0 0 #000, -3px 0 0 #000",
+  };
 }

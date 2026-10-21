@@ -1,6 +1,8 @@
 import { VideoMetadata, StudioWord, AspectRatioMode, SilenceGap } from "@/types/studio";
 import { WordTimestamp } from "@/lib/groq";
 
+export * from "./caption-engine";
+
 /**
  * Format seconds into mm:ss.s timecode string (e.g. 00:04.2)
  */

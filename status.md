@@ -48,7 +48,7 @@ flowchart TD
 | **F_CRUD_AUDIT** | **Full-Stack CRUD Verification & Stream Notice Hardening** | SWE + QA | `COMPLETED` | ✅ Pass (6/6 Full CRUD) | 2026-10-21 |
 | **F_TIMELINE_PRO** | **VN / Adobe Premiere Pro Hybrid Timeline Redesign** | SWE + QA | `COMPLETED` | ✅ Pass (Turbopack Build) | 2026-10-21 |
 | **F04** | **Smart Jump Cut & Silence / Filler Surgery** | SWE + QA | `COMPLETED` | ✅ Pass (19/19 QA Suite) | 2026-10-21 |
-| **F05** | **Kinetic Captions & Contextual Auto-Emoji Engine** | SWE + QA | `BACKLOG` | ⏳ Pending | - |
+| **F05** | **Kinetic Captions & Contextual Auto-Emoji Engine** | SWE + QA | `COMPLETED` | ✅ Pass (14/14 QA Suite) | 2026-10-21 |
 | **F06** | **Automatic Punch Zooms & Visual FX Presets** | SWE + QA | `BACKLOG` | ⏳ Pending | - |
 | **F07** | **Audio Templates, SFX & Dynamic Smart Ducking** | SWE + QA | `BACKLOG` | ⏳ Pending | - |
 | **F08** | **Hybrid Render Pipeline (ffmpeg.wasm + Cloud Fallback)**| SWE + QA | `BACKLOG` | ⏳ Pending | - |
@@ -238,14 +238,33 @@ flowchart TD
 
 ---
 
-### [BACKLOG] F05: Kinetic Captions & Contextual Auto-Emoji Engine
-- **Scope:**
-  - Hormozi-style animated word-by-word pop-in captions.
-  - Configurable styles: font face, uppercase, highlight colors (yellow, green, cyan), background pill.
-  - Contextual auto-emoji placement based on sentiment & keywords (e.g., "money" -> 💸, "growth" -> 📈, "fire" -> 🔥).
+### [COMPLETED] F05: Kinetic Captions & Contextual Auto-Emoji Engine
+- **Owner:** SWE + QA (Multi-Agent Delivery)
+- **Completed:** 2026-10-21
+- **Scope & Deliverables:**
+  - **5 Viral Preset Styles:**
+    1. `⚡ Hormozi Gold`: 8-directional text stroke outline, glowing gold pop (`#FACC15`).
+    2. `🔥 Beast Box`: High-contrast yellow pill box with rotation tilt (`rotate-[-1.5deg]`) and shadow.
+    3. `🌐 Cyber Cyan`: Neon cyan electric drop-shadow (`#38BDF8`) with futuristic typography.
+    4. `✨ Clean Vox`: Minimalist documentary backing with soft frosted backdrop blur.
+    5. `💥 Crimson Viral`: High-CTR urgent alert styling with fiery crimson drop shadow (`#EF4444`).
+  - **Contextual Auto-Emoji Engine (`src/lib/caption-engine.ts`):**
+    - High-impact creator dictionary covering English & Hinglish creator vocabulary (Money/Wealth 💰, Fire/Hype 🔥, Growth/Scale 🚀, Love ❤️, Brain/Idea 💡, Speed ⚡, Victory 🏆, Hinglish: `paisa`, `rokda`, `bawal`, `kamaal`, `dhamaka`, `angaar`).
+    - Punctuation stripping, casing normalization, and plural/suffix invariance.
+    - Sub-frame synchronized pop-in animation via `framer-motion` (`AnimatePresence`, floating spring badge directly over active word).
+  - **Dynamic Word Density & Positioning:**
+    - Words Per Line chunk selector: 1 word (TikTok Rapid), 3 words (Punchy), 5 words (Standard/Vox).
+    - Safe-Area Positioning: `Top` (Headline hook), `Center` (Safe zone), `Bottom` (Classic subtitle).
+    - Custom highlight color palette picker (Gold, Neon Emerald, Cyber Cyan, Hot Rose).
+  - **Persistence & Cloud Sync (`edl_revisions`):**
+    - `POST` and `PATCH /api/projects` persist full `captionSettings` and `captionStyle`.
+    - Project hydration restores all 5 presets, font scale, safe-zone positioning, and auto-emoji toggle seamlessly.
 - **Acceptance Criteria:**
-  - [ ] Active spoken word highlights cleanly during playback.
-  - [ ] Emojis pop onto screen simultaneously with keyword.
+  - [x] Spoken words highlight cleanly during playback with sub-frame temporal accuracy.
+  - [x] Contextual emojis spring onto screen simultaneously with spoken keywords.
+  - [x] Chunking excludes deleted/strikethrough words without leaving broken indices.
+  - [x] Full state persistence and restoration across drafts via Supabase PostgreSQL.
+- **QA Verification:** ✅ **14/14 Test Scenarios PASSED (100% Green)** via `scripts/test-f05-kinetic-captions.mjs`. Next.js Turbopack production build succeeded in 11.2s with Exit Code 0.
 
 ---
 
@@ -337,3 +356,4 @@ When executing any feature from this backlog:
 | 2026-10-21 | F_PROJECTS_DASHBOARD & S3 Storage Optimization | SWE + QA | ✅ PASSED (6/6) | 6/6 test scenarios passed (100% Green) via `test-qa-projects-s3.mjs`. Verified `/projects` dashboard with search and aspect ratio filters, S3 bucket storage usage meter, direct video dropzone with client-side 16kHz mono audio extraction, `DELETE /api/projects` S3 object permanent purge via `deleteS3Object()`, `PATCH /api/projects` inline rename, `/studio?id=...` instant hydration from S3 presigned streaming URL (`videoStreamUrl`), and zero redundant S3 uploads on edits/saves. Turbopack build succeeded with 0 TypeScript errors (Exit Code 0). |
 | 2026-10-21 | Full-Stack CRUD Integrity Audit & Normalization | Lead SWE + QA | ✅ PASSED (6/6) | 6/6 CRUD operations verified (100% Green) via `test-crud-suite.mjs`. Verified: 1. Project creation with transcripts & EDL; 2. Batch project query with `words_json` -> `words` mapping; 3. Single-project hydration with S3 presigned stream URL; 4. Inline metadata rename (`PATCH /api/projects`); 5. Studio draft auto-save with incrementing EDL revisions (`revision_number: 2`) & transcript updates; 6. Project deletion with cascaded DB records and AWS S3 object purge. Turbopack build compiled in 1.6s with 0 TypeScript/lint errors (Exit Code 0). |
 | 2026-10-21 | F04 (Smart Jump Cut & Silence / Filler Surgery) | Lead SWE + QA | ✅ PASSED (19/19) | 19/19 test scenarios passed (100% Green) via `scripts/test-f04-silence-surgery.mjs`. Verified: 1. Silence gap detection across 0.3s, 0.5s, 1.0s thresholds; 2. Safety padding (50ms buffer) with inverted/zero interval protection; 3. Filler word detection for English (um, uh, like, basically, you know) and Hinglish (matlab, yaani); 4. Overlapping & unordered interval union merge to clean monotonic cuts with exact net savings calculation; 5. End-to-end Supabase EDL revisions persistence via POST & PATCH /api/projects with studio hydration; 6. Next.js Turbopack production build succeeded in 15.0s with Exit Code 0. |
+| 2026-10-21 | F05 (Kinetic Captions & Contextual Auto-Emoji) | Lead SWE + QA | ✅ PASSED (14/14) | 14/14 test scenarios passed (100% Green) via `scripts/test-f05-kinetic-captions.mjs`. Verified: 1. Keyword-to-emoji mapping across 8 categories (Money 💰, Fire 🔥, Growth 🚀, Love ❤️, Mind 💡, Speed ⚡, Victory 🏆, Hinglish: paisa, kamaal, dhamaka); 2. Punctuation stripping & casing invariance; 3. Chunking across 1, 3, and 5 words per line with pause hold and cut word exclusion; 4. Sub-frame active word & emoji correlation during playback; 5. All 5 presets (Hormozi Gold, Beast Box, Cyber Cyan, Clean Vox, Crimson Viral) in VideoPlayer & StudioInspector; 6. Supabase EDL revision persistence via POST & PATCH /api/projects with full studio hydration; 7. Next.js Turbopack production build succeeded in 11.2s with Exit Code 0. |

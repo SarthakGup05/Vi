@@ -46,7 +46,67 @@ export type StudioTab = "transcript" | "ingestion" | "silence" | "captions" | "a
 
 export type ActivityRailTab = "media" | "subtitles" | "silence" | "broll" | "audio" | "presets";
 
-export type CaptionStyle = "hormozi" | "beast" | "cyber" | "clean";
+export type CaptionStyle = "hormozi" | "beast" | "cyber" | "clean" | "crimson";
+
+export type CaptionPosition = "top" | "center" | "bottom";
+
+export type WordsPerLine = 1 | 3 | 5;
+
+export type CaptionFontSize = "sm" | "md" | "lg" | "xl";
+
+export interface CaptionHighlightColorItem {
+  id: string;
+  name: string;
+  hex: string;
+  bgClass: string;
+}
+
+export const CAPTION_HIGHLIGHT_COLORS: CaptionHighlightColorItem[] = [
+  { id: "gold", name: "Gold", hex: "#FACC15", bgClass: "bg-[#FACC15]" },
+  { id: "emerald", name: "Neon Emerald", hex: "#10B981", bgClass: "bg-[#10B981]" },
+  { id: "cyan", name: "Cyber Cyan", hex: "#38BDF8", bgClass: "bg-[#38BDF8]" },
+  { id: "rose", name: "Hot Rose", hex: "#F43F5E", bgClass: "bg-[#F43F5E]" },
+];
+
+export interface CaptionSettings {
+  style: CaptionStyle;
+  autoEmoji: boolean;
+  wordsPerLine: number;
+  position: "top" | "center" | "bottom";
+  highlightColor: string;
+  fontSize: "sm" | "md" | "lg" | "xl";
+}
+
+export interface CaptionChunk {
+  id: string;
+  chunkIndex: number;
+  words: StudioWord[];
+  start: number;
+  end: number;
+  duration: number;
+  text: string;
+  emojis: string[];
+}
+
+export interface ActiveCaptionState {
+  phraseWords: StudioWord[];
+  activeIndex: number;
+  activeWord: StudioWord | null;
+  activeEmoji: string | null;
+  chunk?: CaptionChunk | null;
+}
+
+export interface CaptionPresetConfig {
+  id: CaptionStyle;
+  name: string;
+  label: string;
+  tagline: string;
+  defaultHighlight: string;
+  fontFamily: string;
+  textTransform: "uppercase" | "none" | "capitalize";
+  activeClass: string;
+  inactiveClass: string;
+}
 
 export interface ProjectVaultItem {
   id: string;

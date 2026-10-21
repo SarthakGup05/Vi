@@ -18,10 +18,12 @@ import {
   StudioTab,
   ActivityRailTab,
   CaptionStyle,
+  CaptionSettings,
   ProjectVaultItem,
   TimelineCut,
   SilenceGap,
 } from "@/types/studio";
+import { DEFAULT_CAPTION_SETTINGS } from "@/lib/caption-engine";
 import {
   extractVideoMetadata,
   detectFillerWords,
@@ -60,7 +62,21 @@ function StudioContent() {
 
   // Subtitle & Style settings
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("hormozi");
+  const [captionSettings, setCaptionSettings] = useState<CaptionSettings>(DEFAULT_CAPTION_SETTINGS);
   const [showCaptions, setShowCaptions] = useState(true);
+
+  const handleCaptionSettingsChange = useCallback((newSettings: CaptionSettings) => {
+    setCaptionSettings(newSettings);
+    setCaptionStyle(newSettings.style);
+  }, []);
+
+  const handleCaptionStyleChange = useCallback((newStyle: CaptionStyle) => {
+    setCaptionStyle(newStyle);
+    setCaptionSettings((prev) => ({
+      ...prev,
+      style: newStyle,
+    }));
+  }, []);
 
   // Media state
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -161,8 +177,15 @@ function StudioContent() {
         if (latestEdl.cuts && Array.isArray(latestEdl.cuts)) {
           setTimelineCuts(latestEdl.cuts);
         }
-        if (latestEdl.captionStyle) {
+        if (latestEdl.captionSettings) {
+          setCaptionSettings(latestEdl.captionSettings);
+          setCaptionStyle(latestEdl.captionSettings.style || "hormozi");
+        } else if (latestEdl.captionStyle) {
           setCaptionStyle(latestEdl.captionStyle);
+          setCaptionSettings((prev) => ({
+            ...prev,
+            style: latestEdl.captionStyle,
+          }));
         }
       } else {
         setTimelineCuts([]);
@@ -628,7 +651,8 @@ function StudioContent() {
         cuts: timelineCuts,
         deletedWordIds: words.filter((w) => w.deleted).map((w) => w.id),
         effectiveDuration,
-        captionStyle,
+        captionStyle: captionSettings.style,
+        captionSettings,
         aspectRatio,
       };
 
@@ -693,7 +717,7 @@ function StudioContent() {
     }, 2000);
 
     return () => clearTimeout(debounceTimer);
-  }, [words, timelineCuts, captionStyle, aspectRatio, activeProjectId, videoSrc]);
+  }, [words, timelineCuts, captionStyle, captionSettings, aspectRatio, activeProjectId, videoSrc]);
 
   // AI Copilot Execution
   const handleExecuteCopilotPrompt = (prompt: string) => {
@@ -702,10 +726,51 @@ function StudioContent() {
       handleAutoCutSilences();
       setCopilotFeedback(`Copilot: "Trimmed ${silenceCount} silent pause${silenceCount === 1 ? "" : "s"} across the timeline"`);
     } else if (p.includes("gold") || p.includes("hormozi") || p.includes("keyword")) {
-      setCaptionStyle("hormozi");
+      handleCaptionSettingsChange({
+        ...captionSettings,
+        style: "hormozi",
+        highlightColor: "#FACC15",
+      });
       setCopilotFeedback('Copilot: "Applied Hormozi Gold kinetic subtitle preset"');
+    } else if (p.includes("beast")) {
+      handleCaptionSettingsChange({
+        ...captionSettings,
+        style: "beast",
+        highlightColor: "#FACC15",
+      });
+      setCopilotFeedback('Copilot: "Applied Beast Box kinetic subtitle preset"');
+    } else if (p.includes("cyber") || p.includes("neon")) {
+      handleCaptionSettingsChange({
+        ...captionSettings,
+        style: "cyber",
+        highlightColor: "#38BDF8",
+      });
+      setCopilotFeedback('Copilot: "Applied Cyber Neon kinetic subtitle preset"');
+    } else if (p.includes("crimson") || p.includes("alert")) {
+      handleCaptionSettingsChange({
+        ...captionSettings,
+        style: "crimson",
+        highlightColor: "#EF4444",
+      });
+      setCopilotFeedback('Copilot: "Applied Crimson Viral kinetic subtitle preset"');
+    } else if (p.includes("clean") || p.includes("minimal")) {
+      handleCaptionSettingsChange({
+        ...captionSettings,
+        style: "clean",
+        highlightColor: "#FFFFFF",
+      });
+      setCopilotFeedback('Copilot: "Applied Clean Minimal kinetic subtitle preset"');
+    } else if (p.includes("emoji")) {
+      handleCaptionSettingsChange({
+        ...captionSettings,
+        autoEmoji: true,
+      });
+      setCopilotFeedback('Copilot: "Activated Contextual Auto-Emoji Engine"');
     } else if (p.includes("hook") || p.includes("faster") || p.includes("whoosh")) {
-      setCaptionStyle("beast");
+      handleCaptionSettingsChange({
+        ...captionSettings,
+        style: "beast",
+      });
       setCopilotFeedback('Copilot: "Speed ramped intro to 1.15x and queued Whoosh SFX"');
     } else if (p.includes("duck")) {
       setActiveTab("audio");
@@ -867,7 +932,8 @@ function StudioContent() {
                 onDurationChange={setDuration}
                 words={words}
                 cuts={timelineCuts}
-                captionStyle={captionStyle}
+                captionStyle={captionSettings.style}
+                captionSettings={captionSettings}
                 showCaptions={showCaptions}
                 onToggleCaptions={() => setShowCaptions(!showCaptions)}
                 onAttachLocalFile={(file) => {
@@ -918,8 +984,18 @@ function StudioContent() {
           onRestoreAllSilences={handleRestoreAllSilences}
           silenceThreshold={silenceThreshold}
           onSilenceThresholdChange={setSilenceThreshold}
-          captionStyle={captionStyle}
-          onCaptionStyleChange={setCaptionStyle}
+          captionStyle={captionSettings.style}
+          onCaptionStyleChange={handleCaptionStyleChange}
+          captionSettings={captionSettings}
+          onCaptionSettingsChange={handleCaptionSettingsChange}
+          captionPosition={captionSettings.position}
+          onCaptionPositionChange={(pos) => handleCaptionSettingsChange({ ...captionSettings, position: pos })}
+          wordsPerLine={captionSettings.wordsPerLine}
+          onWordsPerLineChange={(w) => handleCaptionSettingsChange({ ...captionSettings, wordsPerLine: w })}
+          highlightColor={captionSettings.highlightColor}
+          onHighlightColorChange={(c) => handleCaptionSettingsChange({ ...captionSettings, highlightColor: c })}
+          autoEmoji={captionSettings.autoEmoji}
+          onAutoEmojiChange={(e) => handleCaptionSettingsChange({ ...captionSettings, autoEmoji: e })}
           onExecuteCopilotPrompt={handleExecuteCopilotPrompt}
           copilotFeedback={copilotFeedback}
         />

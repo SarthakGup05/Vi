@@ -22,8 +22,18 @@ export async function POST(req: NextRequest) {
       user_id,
       transcript,
       edl,
+      captionSettings,
       applied_prompt,
     } = body;
+
+    let finalEdl = edl || null;
+    if (captionSettings) {
+      if (!finalEdl) {
+        finalEdl = { captionSettings, captionStyle: captionSettings.style || captionSettings.preset };
+      } else if (!finalEdl.captionSettings) {
+        finalEdl = { ...finalEdl, captionSettings };
+      }
+    }
 
     if (!raw_video_s3_key && !projectId) {
       return NextResponse.json(
@@ -110,20 +120,25 @@ export async function POST(req: NextRequest) {
     }
 
     if (!savedProject) {
+      const insertData: Record<string, unknown> = {
+        title,
+        raw_video_s3_key,
+        file_size_bytes,
+        aspect_ratio,
+        width,
+        height,
+        duration_seconds,
+        session_id: validSessionId,
+        user_id: user_id || null,
+        status: "ready",
+      };
+      if (isValidUUID(projectId)) {
+        insertData.id = projectId;
+      }
+
       const { data, error } = await admin
         .from("projects")
-        .insert({
-          title,
-          raw_video_s3_key,
-          file_size_bytes,
-          aspect_ratio,
-          width,
-          height,
-          duration_seconds,
-          session_id: validSessionId,
-          user_id: user_id || null,
-          status: "ready",
-        })
+        .insert(insertData)
         .select()
         .single();
 
@@ -170,7 +185,7 @@ export async function POST(req: NextRequest) {
 
     // If EDL payload is attached, persist to edl_revisions table
     let edlRevision = null;
-    if (savedProject?.id && edl) {
+    if (savedProject?.id && finalEdl) {
       const { data: latestRev } = await admin
         .from("edl_revisions")
         .select("revision_number")
@@ -187,7 +202,7 @@ export async function POST(req: NextRequest) {
           project_id: savedProject.id,
           revision_number: nextRevision,
           applied_prompt: applied_prompt || "Draft EDL save",
-          edl_payload: edl,
+          edl_payload: finalEdl,
         })
         .select()
         .single();
@@ -242,10 +257,14 @@ export async function GET(req: NextRequest) {
         (a: Record<string, any>, b: Record<string, any>) => (b.revision_number || 0) - (a.revision_number || 0)
       );
 
+      const latestEdlPayload = sortedEdl[0]?.edl_payload;
+
       return {
         ...p,
         transcripts: normalizedTranscripts,
         edl_revisions: sortedEdl,
+        captionSettings: latestEdlPayload?.captionSettings || null,
+        captionStyle: latestEdlPayload?.captionStyle || latestEdlPayload?.captionSettings?.style || "hormozi",
         videoStreamUrl,
       };
     };
@@ -368,7 +387,7 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, title, aspect_ratio, edl, applied_prompt } = body;
+    const { id, title, aspect_ratio, edl, captionSettings, applied_prompt } = body;
 
     if (!id) {
       return NextResponse.json({ error: "Project ID is required" }, { status: 400 });
@@ -394,8 +413,17 @@ export async function PATCH(req: NextRequest) {
 
     if (error) throw error;
 
+    let finalEdl = edl || null;
+    if (captionSettings) {
+      if (!finalEdl) {
+        finalEdl = { captionSettings, captionStyle: captionSettings.style || captionSettings.preset };
+      } else if (!finalEdl.captionSettings) {
+        finalEdl = { ...finalEdl, captionSettings };
+      }
+    }
+
     let edlRevision = null;
-    if (edl) {
+    if (finalEdl) {
       const { data: latestRev } = await admin
         .from("edl_revisions")
         .select("revision_number")
@@ -412,7 +440,7 @@ export async function PATCH(req: NextRequest) {
           project_id: id,
           revision_number: nextRevision,
           applied_prompt: applied_prompt || "EDL revision update",
-          edl_payload: edl,
+          edl_payload: finalEdl,
         })
         .select()
         .single();
