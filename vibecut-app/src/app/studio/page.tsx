@@ -27,12 +27,15 @@ import {
   PunchZoomCadence,
   PunchZoomInterval,
   SfxCueId,
+  TransitionItem,
+  TransitionEffectId,
 } from "@/types/studio";
 import {
   calculatePunchZoomIntervals,
   applyTrendingTemplateToEdl as applyPresetTemplate,
   playProceduralSfx,
 } from "@/lib/vfx-sfx-engine";
+import { aiAnalyzeAndSuggestTransitions } from "@/lib/transitions-engine";
 import { DEFAULT_CAPTION_SETTINGS } from "@/lib/caption-engine";
 import {
   extractVideoMetadata,
@@ -112,6 +115,8 @@ function StudioContent() {
 
   const [words, setWords] = useState<StudioWord[]>([]);
   const [timelineCuts, setTimelineCuts] = useState<TimelineCut[]>([]);
+  const [transitions, setTransitions] = useState<TransitionItem[]>([]);
+  const [selectedTransitionId, setSelectedTransitionId] = useState<string | null>(null);
   // Visual FX, Presets & Punch Zoom state
   const [activeTemplate, setActiveTemplate] = useState<TrendingTemplateId>("beast_viral");
   const [vfxSettings, setVfxSettings] = useState<VFXSettings>({
@@ -200,6 +205,11 @@ function StudioContent() {
       if (latestEdl) {
         if (latestEdl.cuts && Array.isArray(latestEdl.cuts)) {
           setTimelineCuts(latestEdl.cuts);
+        }
+        if (latestEdl.transitions && Array.isArray(latestEdl.transitions)) {
+          setTransitions(latestEdl.transitions);
+        } else {
+          setTransitions([]);
         }
         if (latestEdl.template || proj.template) {
           setActiveTemplate(latestEdl.template || proj.template);
@@ -504,6 +514,7 @@ function StudioContent() {
     setMetadata(null);
     setWords([]);
     setTimelineCuts([]);
+    setTransitions([]);
     setCurrentTime(0);
     setDuration(0);
     setProjectName("Untitled Project");
@@ -645,6 +656,83 @@ function StudioContent() {
     showToast("All timeline cuts cleared");
   };
 
+  // AI Content-Aware Transition Auto-Match & Assignment
+  const handleAutoApplyAITransitions = useCallback(() => {
+    const suggested = aiAnalyzeAndSuggestTransitions(words, timelineCuts, duration);
+    setTransitions(suggested);
+    if (suggested.length > 0) {
+      showToast(`⚡ AI Auto-Matched ${suggested.length} cinematic transitions!`);
+    } else {
+      showToast("No transition candidates found. Try adding cuts or speech words.");
+    }
+  }, [words, timelineCuts, duration, showToast]);
+
+  const handleAddTransition = useCallback((transition: TransitionItem) => {
+    setTransitions((prev) => [
+      ...prev.filter((t) => Math.abs(t.timestamp - transition.timestamp) > 0.1),
+      transition,
+    ].sort((a, b) => a.timestamp - b.timestamp));
+    showToast(`Added ${transition.effect.replace("_", " ")} transition`);
+  }, [showToast]);
+
+  const handleRemoveTransition = useCallback((id: string) => {
+    setTransitions((prev) => prev.filter((t) => t.id !== id));
+    showToast("Transition removed");
+  }, [showToast]);
+
+  const handleClearTransitions = useCallback(() => {
+    setTransitions([]);
+    showToast("All transitions cleared");
+  }, [showToast]);
+
+  const handleSelectTransition = useCallback((idOrTrans: string | TransitionItem | null) => {
+    if (!idOrTrans) {
+      setSelectedTransitionId(null);
+    } else if (typeof idOrTrans === "string") {
+      setSelectedTransitionId(idOrTrans);
+    } else {
+      setSelectedTransitionId(idOrTrans.id);
+    }
+  }, []);
+
+  const handleAddOrChangeTransitionAtTime = useCallback(
+    (time: number, effect: TransitionEffectId, dur = 0.3) => {
+      setTransitions((prev) => {
+        const filtered = prev.filter((t) => Math.abs(t.timestamp - time) > 0.35);
+        const newTrans: TransitionItem = {
+          id: `tr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: parseFloat(time.toFixed(2)),
+          effect,
+          duration: dur,
+          aiSuggested: false,
+        };
+        return [...filtered, newTrans].sort((a, b) => a.timestamp - b.timestamp);
+      });
+      showToast(`Applied ${effect.replace("_", " ")} at ${formatTimecode(time)}`);
+    },
+    [showToast]
+  );
+
+  const handleApplyTransitionToAll = useCallback(
+    (effect: TransitionEffectId, dur = 0.3) => {
+      const points = timelineCuts.map((c) => c.start);
+      if (points.length === 0 && duration > 2) {
+        points.push(duration * 0.33, duration * 0.66);
+      }
+      const newTransitions: TransitionItem[] = points.map((pt, i) => ({
+        id: `tr-all-${i}-${Date.now().toString(36)}`,
+        timestamp: parseFloat(pt.toFixed(2)),
+        effect,
+        duration: dur,
+        aiSuggested: false,
+        aiReason: `Bulk Applied ${effect.replace("_", " ")}`,
+      }));
+      setTransitions(newTransitions);
+      showToast(`Applied ${effect.replace("_", " ")} across ${newTransitions.length} cut seams`);
+    },
+    [timelineCuts, duration, showToast]
+  );
+
   // Compute union duration of all cuts (deleted words + timeline cuts)
   const totalCutDuration = useMemo(() => {
     const intervals: { start: number; end: number }[] = [];
@@ -705,6 +793,7 @@ function StudioContent() {
     try {
       const edlPayload = {
         cuts: timelineCuts,
+        transitions,
         deletedWordIds: words.filter((w) => w.deleted).map((w) => w.id),
         effectiveDuration,
         captionStyle: captionSettings.style,
@@ -776,12 +865,15 @@ function StudioContent() {
     }, 2000);
 
     return () => clearTimeout(debounceTimer);
-  }, [words, timelineCuts, captionStyle, captionSettings, aspectRatio, activeProjectId, videoSrc]);
+  }, [words, timelineCuts, transitions, captionStyle, captionSettings, aspectRatio, activeProjectId, videoSrc]);
 
   // AI Copilot Execution
   const handleExecuteCopilotPrompt = (prompt: string) => {
     const p = prompt.toLowerCase();
-    if (p.includes("silence") || p.includes("pause")) {
+    if (p.includes("transition") || p.includes("whip") || p.includes("dissolve") || p.includes("glitch") || p.includes("flash")) {
+      handleAutoApplyAITransitions();
+      setCopilotFeedback('Copilot: "Analyzed video cadence and auto-matched cinematic transitions!"');
+    } else if (p.includes("silence") || p.includes("pause")) {
       handleAutoCutSilences();
       setCopilotFeedback(`Copilot: "Trimmed ${silenceCount} silent pause${silenceCount === 1 ? "" : "s"} across the timeline"`);
     } else if (p.includes("gold") || p.includes("hormozi") || p.includes("keyword")) {
@@ -846,6 +938,8 @@ function StudioContent() {
     else if (railTab === "silence") setActiveTab("silence");
     else if (railTab === "audio") setActiveTab("audio");
     else if (railTab === "media") setActiveTab("transcript");
+    else if (railTab === "presets") setActiveTab("presets");
+    else if (railTab === "transitions") setActiveTab("transitions");
     else setActiveTab("captions");
   };
 
@@ -998,6 +1092,7 @@ function StudioContent() {
                 vfxSettings={vfxSettings}
                 zoomCadence={zoomCadence}
                 zoomIntervals={zoomIntervals}
+                transitions={transitions}
                 onAttachLocalFile={(file) => {
                   const url = URL.createObjectURL(file);
                   setVideoSrc(url);
@@ -1027,6 +1122,16 @@ function StudioContent() {
             silenceCount={silenceCount}
             punchZoomIntervals={zoomIntervals}
             activeVFXFilter={vfxSettings.filter}
+            transitions={transitions}
+            selectedTransitionId={selectedTransitionId}
+            onSelectTransition={handleSelectTransition}
+            onUpdateTransitions={setTransitions}
+            onAddOrChangeTransitionAtTime={handleAddOrChangeTransitionAtTime}
+            onRemoveTransition={handleRemoveTransition}
+            onOpenTransitionsTab={() => {
+              setActiveTab("transitions");
+              setActivityRailTab("transitions");
+            }}
           />
         </div>
 
@@ -1075,6 +1180,14 @@ function StudioContent() {
           zoomCadence={zoomCadence}
           onZoomCadenceChange={setZoomCadence}
           zoomIntervals={zoomIntervals}
+          transitions={transitions}
+          onUpdateTransitions={setTransitions}
+          onAutoApplyAITransitions={handleAutoApplyAITransitions}
+          selectedTransitionId={selectedTransitionId}
+          onSelectTransition={handleSelectTransition}
+          onApplyTransitionToCut={handleAddOrChangeTransitionAtTime}
+          onApplyTransitionToAll={handleApplyTransitionToAll}
+          onRemoveTransition={handleRemoveTransition}
           onPlaySfx={(cue) => playProceduralSfx(cue as SfxCueId)}
         />
       </div>

@@ -36,6 +36,7 @@ import {
   PunchZoomCadence,
   VFXSettings,
   SFXSettings,
+  TransitionItem,
 } from "@/types/studio";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -46,7 +47,8 @@ import {
   DEFAULT_CAPTION_SETTINGS,
 } from "@/lib/caption-engine";
 import { getVFXFilterStyle, getVFXOverlayFlags } from "@/lib/vfx-engine";
-import { playSFX } from "@/lib/sfx-engine";
+import { playSFX, SFXCue } from "@/lib/sfx-engine";
+import { getActiveTransition, getTransitionStyles } from "@/lib/transitions-engine";
 
 interface VideoPlayerProps {
   src: string;
@@ -70,6 +72,7 @@ interface VideoPlayerProps {
   punchZooms?: PunchZoomInterval[];
   zoomCadence?: PunchZoomCadence;
   zoomIntervals?: PunchZoomInterval[];
+  transitions?: TransitionItem[];
 }
 
 export function VideoPlayer({
@@ -93,6 +96,7 @@ export function VideoPlayer({
   sfxSettings,
   punchZooms,
   zoomIntervals,
+  transitions = [],
 }: VideoPlayerProps) {
   const localRef = useRef<HTMLVideoElement | null>(null);
   const videoRef = externalRef || localRef;
@@ -157,6 +161,45 @@ export function VideoPlayer({
       lastTriggeredZoomIdRef.current = null;
     }
   }, [activeZoom, isPlaying, sfxSettings, isMuted]);
+
+  // Real-time Transitions Engine: checks if currentTime falls within [t.timestamp - duration/2, t.timestamp + duration/2]
+  const activeTransitionState = useMemo(() => {
+    return getActiveTransition(currentTime, transitions);
+  }, [currentTime, transitions]);
+
+  const transitionStyles = useMemo(() => {
+    return getTransitionStyles(activeTransitionState);
+  }, [activeTransitionState]);
+
+  const lastTriggeredTransitionIdRef = useRef<string | null>(null);
+
+  // Trigger procedural SFX (whoosh / boom / glitch) when transition triggers during playback
+  useEffect(() => {
+    if (!isPlaying) return;
+    if (sfxSettings && !sfxSettings.enabled) return;
+
+    if (activeTransitionState.active && activeTransitionState.transition) {
+      const tid = activeTransitionState.transition.id;
+      if (lastTriggeredTransitionIdRef.current !== tid) {
+        lastTriggeredTransitionIdRef.current = tid;
+
+        const effect = activeTransitionState.transition.effect;
+        let cue: SFXCue = "whoosh";
+        if (effect === "glitch_slice") {
+          cue = "glitch";
+        } else if (effect === "flash_white" || effect === "zoom_crash") {
+          cue = "boom";
+        } else {
+          cue = "whoosh";
+        }
+
+        const vol = sfxSettings?.masterVolume ?? 0.6;
+        playSFX(cue, vol * 0.85, isMuted);
+      }
+    } else {
+      lastTriggeredTransitionIdRef.current = null;
+    }
+  }, [activeTransitionState, isPlaying, sfxSettings, isMuted]);
 
 
   // Clear errors and reload when src changes
@@ -261,22 +304,34 @@ export function VideoPlayer({
     [mergedCutIntervals, duration, onTimeUpdate, videoRef, sfxSettings, isPlaying, isMuted]
   );
 
-  // Sub-frame animation loop for ultra-smooth instantaneous cut skipping during playback
+  // Sub-frame animation loop for ultra-smooth instantaneous cut skipping and transitions during playback
   useEffect(() => {
-    if (!isPlaying || mergedCutIntervals.length === 0) return;
+    if (!isPlaying) return;
 
     let animId: number;
     const tick = () => {
       if (videoRef.current && !videoRef.current.paused) {
         const curr = videoRef.current.currentTime;
-        checkAndSkipCuts(curr);
+        if (mergedCutIntervals.length > 0) {
+          checkAndSkipCuts(curr);
+        }
+        // If a transition is active or nearby (within 0.4s), drive 60fps time updates for silky smooth animations
+        if (transitions.length > 0) {
+          const isNear = transitions.some(
+            (t) => Math.abs(curr - t.timestamp) <= (t.duration || 0.35)
+          );
+          if (isNear) {
+            setCurrentTime(curr);
+            onTimeUpdate?.(curr);
+          }
+        }
       }
       animId = requestAnimationFrame(tick);
     };
 
     animId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, mergedCutIntervals, checkAndSkipCuts, videoRef]);
+  }, [isPlaying, mergedCutIntervals, checkAndSkipCuts, transitions, onTimeUpdate, videoRef]);
 
   useEffect(() => {
     setCaptionsVisible(showCaptions);
@@ -505,13 +560,22 @@ export function VideoPlayer({
           }}
         />
 
-        {/* Real-time Camera Punch Zoom Transform Container */}
+        {/* Real-time Camera Punch Zoom & Transition Transform Container */}
         <div
           className="relative w-full h-full flex items-center justify-center overflow-hidden"
           style={{
-            transform: `scale(${zoomScale})`,
+            transform: [
+              `scale(${zoomScale * (activeTransitionState.active ? (transitionStyles.zoomScale ?? 1) : 1)})`,
+              activeTransitionState.active && transitionStyles.containerStyle?.transform,
+            ]
+              .filter(Boolean)
+              .join(" "),
+            filter: activeTransitionState.active ? transitionStyles.containerStyle?.filter : undefined,
+            opacity: activeTransitionState.active ? transitionStyles.containerStyle?.opacity : undefined,
             transformOrigin: zoomOrigin,
-            transition: "transform 0.18s cubic-bezier(0.2, 0, 0, 1)",
+            transition: activeTransitionState.active
+              ? "none"
+              : "transform 0.18s cubic-bezier(0.2, 0, 0, 1)",
           }}
         >
           {/* Video Element */}
@@ -614,6 +678,128 @@ export function VideoPlayer({
                 <span className="text-emerald-400 text-[10px] font-bold">STEREO Hi-Fi</span>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ================================================================ */}
+        {/* REAL-TIME TRANSITION OVERLAYS & LIVE SHADER EFFECTS              */}
+        {/* ================================================================ */}
+
+        {/* 1. Flash White Overlay */}
+        {transitionStyles.flashWhiteOpacity > 0 && (
+          <div
+            data-transition="flash_white"
+            className="absolute inset-0 pointer-events-none z-28 bg-white"
+            style={{
+              opacity: transitionStyles.flashWhiteOpacity,
+              mixBlendMode: "screen",
+            }}
+          />
+        )}
+
+        {/* 2. Dip to Black Overlay */}
+        {transitionStyles.dipBlackOpacity > 0 && (
+          <div
+            data-transition="dip_black"
+            className="absolute inset-0 pointer-events-none z-28 bg-black"
+            style={{
+              opacity: transitionStyles.dipBlackOpacity,
+            }}
+          />
+        )}
+
+        {/* 3. Glitch Slice Displaced RGB Strips & Scanlines */}
+        {transitionStyles.glitchActive && (
+          <div
+            data-transition="glitch_slice"
+            className="absolute inset-0 pointer-events-none z-28 overflow-hidden mix-blend-screen"
+          >
+            <div
+              className="absolute inset-0 opacity-80"
+              style={{
+                boxShadow: `inset ${Math.sin(activeTransitionState.progress * Math.PI * 6) * 16}px 0 0 rgba(239,68,68,0.7), inset ${-Math.sin(activeTransitionState.progress * Math.PI * 6) * 16}px 0 0 rgba(56,189,248,0.7)`,
+              }}
+            />
+            <div
+              className="absolute inset-0"
+              style={{
+                backgroundImage:
+                  "repeating-linear-gradient(0deg, rgba(255,255,255,0.2) 0px, rgba(255,255,255,0.2) 2px, transparent 2px, transparent 6px)",
+                transform: `translateX(${Math.sin(activeTransitionState.progress * Math.PI * 14) * 10}px)`,
+              }}
+            />
+          </div>
+        )}
+
+        {/* 4. Whip Pan Horizontal Motion Blur Streaks */}
+        {activeTransitionState.active && activeTransitionState.transition?.effect === "whip_pan" && (
+          <div
+            data-transition="whip_pan"
+            className="absolute inset-0 pointer-events-none z-27 opacity-30 mix-blend-overlay"
+            style={{
+              backgroundImage:
+                "repeating-linear-gradient(90deg, rgba(255,255,255,0.3) 0px, rgba(255,255,255,0.3) 4px, transparent 4px, transparent 20px)",
+            }}
+          />
+        )}
+
+        {/* 5. Zoom Crash Punch Vignette */}
+        {activeTransitionState.active && activeTransitionState.transition?.effect === "zoom_crash" && (
+          <div
+            data-transition="zoom_crash"
+            className="absolute inset-0 pointer-events-none z-27 opacity-40 mix-blend-overlay"
+            style={{
+              background: "radial-gradient(circle, transparent 40%, rgba(0,0,0,0.85) 100%)",
+            }}
+          />
+        )}
+
+        {/* 6. Cross Dissolve Filmic Blend Overlay */}
+        {activeTransitionState.active && activeTransitionState.transition?.effect === "cross_dissolve" && (
+          <div
+            data-transition="cross_dissolve"
+            className="absolute inset-0 pointer-events-none z-27 bg-black/40 backdrop-blur-xs"
+            style={{
+              opacity: transitionStyles.crossDissolveOpacity || activeTransitionState.intensity * 0.5,
+            }}
+          />
+        )}
+
+        {/* 7. Slide Left Lateral Shutter Overlay */}
+        {activeTransitionState.active && activeTransitionState.transition?.effect === "slide_left" && (
+          <div
+            data-transition="slide_left"
+            className="absolute inset-0 pointer-events-none z-27 bg-black/30"
+            style={{
+              opacity: activeTransitionState.intensity * 0.4,
+              transform: `translateX(${transitionStyles.slideLeftOffset || (activeTransitionState.progress - 0.5) * -100}%)`,
+            }}
+          />
+        )}
+
+        {/* 8. Spin Roll Centrifugal Barrel Rotation Overlay */}
+        {activeTransitionState.active && activeTransitionState.transition?.effect === "spin_roll" && (
+          <div
+            data-transition="spin_roll"
+            className="absolute inset-0 pointer-events-none z-27 bg-indigo-500/15 mix-blend-overlay"
+            style={{
+              opacity: activeTransitionState.intensity * 0.5,
+              transform: `rotate(${transitionStyles.spinRollRotation || (activeTransitionState.progress - 0.5) * 180}deg)`,
+            }}
+          />
+        )}
+
+        {/* Live Active Transition HUD Pill */}
+        {activeTransitionState.active && activeTransitionState.transition && (
+          <div className="absolute top-4 left-4 z-30 pointer-events-none flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/80 border border-violet-500/50 backdrop-blur-md shadow-lg text-[10px] font-mono font-bold text-violet-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping" />
+            <span className="uppercase tracking-wider">
+              {activeTransitionState.transition.effect.replace("_", " ")}
+            </span>
+            <span className="text-zinc-500">•</span>
+            <span className="text-amber-400">
+              {Math.round(activeTransitionState.progress * 100)}%
+            </span>
           </div>
         )}
 
@@ -806,6 +992,19 @@ export function VideoPlayer({
           >
             <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-amber-400 rounded-full shadow-md scale-0 group-hover/bar:scale-100 transition-transform" />
           </div>
+
+          {/* Transition Markers on Seeker Bar */}
+          {transitions.map((t) => {
+            const leftPct = duration > 0 ? (t.timestamp / duration) * 100 : 0;
+            return (
+              <div
+                key={t.id}
+                title={`${t.effect.replace("_", " ")} (${t.timestamp.toFixed(1)}s)`}
+                className="absolute top-1/2 -translate-y-1/2 w-1.5 h-3 -ml-[3px] rounded-sm bg-violet-400 shadow-sm border border-violet-200/50 pointer-events-none z-10 opacity-80"
+                style={{ left: `${leftPct}%` }}
+              />
+            );
+          })}
         </div>
 
         {/* Transport Buttons Row */}

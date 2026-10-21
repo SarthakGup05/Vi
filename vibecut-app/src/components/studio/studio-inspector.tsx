@@ -35,6 +35,7 @@ import {
   Eye,
   Play,
   Volume1,
+  Clock,
 } from "lucide-react";
 import {
   StudioWord,
@@ -57,6 +58,10 @@ import {
   TemplatePreset,
   SFXSoundId,
   SfxCueId,
+  TransitionItem,
+  TransitionEffectId,
+  TransitionCategory,
+  TransitionEffectConfig,
 } from "@/types/studio";
 import { formatTimecode, detectSilenceGaps } from "@/lib/studio-utils";
 import {
@@ -70,6 +75,11 @@ import {
   playSFXSound,
 } from "@/lib/vfx-presets";
 import { playProceduralSfx } from "@/lib/vfx-sfx-engine";
+import {
+  TRANSITION_EFFECTS_CATALOG,
+  TRANSITION_CONFIG_MAP,
+  recommendTransitions,
+} from "@/lib/transitions-engine";
 
 interface StudioInspectorProps {
   activeTab: StudioTab;
@@ -128,6 +138,14 @@ interface StudioInspectorProps {
   onToggleSfxMute?: () => void;
   onTriggerTestPunch?: () => void;
   onPlaySfx?: (sfx: SFXSoundId | string) => void;
+  transitions?: TransitionItem[];
+  onUpdateTransitions?: (transitions: TransitionItem[]) => void;
+  onAutoApplyAITransitions?: () => void;
+  onSelectTransition?: (idOrTrans: string | TransitionItem | null) => void;
+  selectedTransitionId?: string | null;
+  onApplyTransitionToCut?: (cutTime: number, effect: TransitionEffectId, duration?: number) => void;
+  onApplyTransitionToAll?: (effect: TransitionEffectId, duration?: number) => void;
+  onRemoveTransition?: (id: string) => void;
 }
 
 export function StudioInspector({
@@ -137,6 +155,14 @@ export function StudioInspector({
   currentTime,
   duration = 0,
   cuts = [],
+  transitions = [],
+  onUpdateTransitions,
+  onAutoApplyAITransitions,
+  onSelectTransition,
+  selectedTransitionId,
+  onApplyTransitionToCut,
+  onApplyTransitionToAll,
+  onRemoveTransition,
   onSeekToWord,
   onToggleWordDeleted,
   onBatchToggleWords,
@@ -190,6 +216,14 @@ export function StudioInspector({
   const [searchQuery, setSearchQuery] = useState("");
   const [copilotInput, setCopilotInput] = useState("");
   const [isCopilotThinking, setIsCopilotThinking] = useState(false);
+
+  // Transitions Tab Local State
+  const [transitionDuration, setTransitionDuration] = useState<number>(0.3);
+  const [transitionCategoryFilter, setTransitionCategoryFilter] = useState<
+    "all" | "cinematic" | "dynamic" | "glitch" | "geometric"
+  >("all");
+  const [hoveredEffectId, setHoveredEffectId] = useState<TransitionEffectId | null>(null);
+  const [isAnalyzingTransitions, setIsAnalyzingTransitions] = useState<boolean>(false);
 
   // Unified Caption Settings state management
   const [localSettings, setLocalSettings] = useState<CaptionSettings>(() => ({
@@ -602,6 +636,18 @@ export function StudioInspector({
           >
             <Sliders className="h-3.5 w-3.5" />
             <span>Audio & SFX</span>
+          </button>
+
+          <button
+            onClick={() => onTabChange("transitions")}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === "transitions"
+                ? "bg-violet-600/20 text-violet-300 border border-violet-500/40"
+                : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+            <span>Transitions</span>
           </button>
         </div>
       </div>
@@ -1696,6 +1742,506 @@ export function StudioInspector({
             </div>
           </div>
         )}
+        {/* TAB 6: TRANSITION EFFECTS & AI AUTO-MATCH ENGINE */}
+        {activeTab === "transitions" && (
+          <div className="flex flex-col gap-4">
+            {/* 1. AI Smart Transitions Banner / Card */}
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0c1424] via-[#101524] to-[#180e28] border border-cyan-500/30 p-4 shadow-xl">
+              {/* Decorative background glow */}
+              <div className="absolute -top-10 -right-10 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-violet-600/10 rounded-full blur-2xl pointer-events-none" />
+
+              <div className="relative z-10 flex flex-col gap-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-cyan-400 animate-pulse" />
+                    <span className="text-xs font-black tracking-wider text-cyan-300 uppercase">
+                      AI Smart Transitions
+                    </span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 shadow-sm">
+                    Auto-Cadence Engine
+                  </span>
+                </div>
+
+                <p className="text-[11px] leading-relaxed text-zinc-300">
+                  AI analyzes speech cadence, emotional emphasis, and scene changes to assign optimal transitions to every cut seam.
+                </p>
+
+                {/* 1-Click AI Auto-Match Button */}
+                <button
+                  onClick={() => {
+                    setIsAnalyzingTransitions(true);
+                    playProceduralSfx("whoosh");
+                    setTimeout(() => {
+                      if (onAutoApplyAITransitions) {
+                        onAutoApplyAITransitions();
+                      } else {
+                        const suggested = recommendTransitions(words, {
+                          cuts,
+                          minIntervalDistance: 1.2,
+                          maxTransitions: 16,
+                        });
+                        onUpdateTransitions?.(suggested);
+                      }
+                      setIsAnalyzingTransitions(false);
+                    }, 450);
+                  }}
+                  disabled={isAnalyzingTransitions}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-cyan-500 via-indigo-600 to-violet-600 hover:from-cyan-400 hover:to-violet-500 shadow-lg shadow-cyan-500/25 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer disabled:opacity-60"
+                >
+                  {isAnalyzingTransitions ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
+                      <span>Analyzing Cadence & Cut Seams...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-3.5 w-3.5 text-cyan-200 fill-cyan-200" />
+                      <span>⚡ AI Auto-Match Transitions</span>
+                    </>
+                  )}
+                </button>
+
+                {/* AI Stats & Reason Tags */}
+                {transitions.filter((t) => t.aiSuggested).length > 0 && (
+                  <div className="pt-2 border-t border-white/10 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-zinc-300">
+                        {transitions.filter((t) => t.aiSuggested).length} AI-Matched Transitions Active
+                      </span>
+                      <button
+                        onClick={() => {
+                          onUpdateTransitions?.([]);
+                          onSelectTransition?.(null);
+                        }}
+                        className="text-[10px] text-zinc-400 hover:text-rose-400 transition-colors cursor-pointer"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+
+                    {/* Reason Tag Chips */}
+                    <div className="flex flex-wrap gap-1.5 mt-0.5">
+                      {Array.from(new Set(transitions.filter((t) => t.aiReason).map((t) => t.aiReason!)))
+                        .slice(0, 6)
+                        .map((reason, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-0.5 rounded-lg bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 text-[10px] font-medium flex items-center gap-1 shadow-sm"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                            {reason}
+                          </span>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Global Transition Duration Slider */}
+            <div className="p-3.5 rounded-xl bg-[#14141d] border border-white/5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5 text-cyan-400" />
+                  Transition Duration
+                </span>
+                <span className="px-2 py-0.5 rounded font-mono text-xs font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                  {transitionDuration.toFixed(2)}s
+                </span>
+              </div>
+
+              <input
+                type="range"
+                min="0.1"
+                max="1.0"
+                step="0.05"
+                value={transitionDuration}
+                onChange={(e) => setTransitionDuration(parseFloat(e.target.value))}
+                className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
+              />
+
+              {/* Speed presets */}
+              <div className="flex items-center justify-between gap-1.5 pt-1">
+                <button
+                  onClick={() => setTransitionDuration(0.15)}
+                  className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
+                    transitionDuration === 0.15
+                      ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                      : "bg-[#181822] text-zinc-400 border-white/5 hover:text-white"
+                  }`}
+                >
+                  ⚡ 0.15s Snappy
+                </button>
+                <button
+                  onClick={() => setTransitionDuration(0.3)}
+                  className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
+                    transitionDuration === 0.3
+                      ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                      : "bg-[#181822] text-zinc-400 border-white/5 hover:text-white"
+                  }`}
+                >
+                  🎯 0.30s Standard
+                </button>
+                <button
+                  onClick={() => setTransitionDuration(0.5)}
+                  className={`flex-1 py-1 px-2 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer ${
+                    transitionDuration === 0.5
+                      ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                      : "bg-[#181822] text-zinc-400 border-white/5 hover:text-white"
+                  }`}
+                >
+                  🎬 0.50s Cinematic
+                </button>
+              </div>
+
+              {transitions.length > 0 && (
+                <button
+                  onClick={() => {
+                    const updated = transitions.map((t) => ({ ...t, duration: transitionDuration }));
+                    onUpdateTransitions?.(updated);
+                    playProceduralSfx("whoosh");
+                  }}
+                  className="w-full py-1.5 rounded-lg text-[11px] font-semibold text-zinc-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 transition-all cursor-pointer text-center"
+                >
+                  Apply {transitionDuration.toFixed(2)}s to all {transitions.length} active transitions
+                </button>
+              )}
+            </div>
+
+            {/* 3. Transition Effects Catalog Grid */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-bold text-zinc-200">Transition Catalog</h3>
+                  <p className="text-[10px] text-zinc-400">8 Cinematic, Speed, Glitch & Geometric Presets</p>
+                </div>
+
+                {/* Category Filter Tabs */}
+                <div className="flex items-center gap-1 bg-[#161622] p-0.5 rounded-lg border border-white/5">
+                  {(
+                    [
+                      { id: "all", label: "All" },
+                      { id: "cinematic", label: "Cinematic" },
+                      { id: "dynamic", label: "Dynamic" },
+                      { id: "glitch", label: "Glitch" },
+                      { id: "geometric", label: "Geometric" },
+                    ] as const
+                  ).map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setTransitionCategoryFilter(cat.id)}
+                      className={`px-2 py-0.5 rounded-md text-[9px] font-semibold transition-all cursor-pointer ${
+                        transitionCategoryFilter === cat.id
+                          ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
+                          : "text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Effects Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {TRANSITION_EFFECTS_CATALOG.filter((item) => {
+                  if (transitionCategoryFilter === "all") return true;
+                  if (transitionCategoryFilter === "cinematic") return item.category === "cinematic";
+                  if (transitionCategoryFilter === "dynamic") return item.category === "dynamic";
+                  if (transitionCategoryFilter === "glitch") return item.category === "glitch";
+                  if (transitionCategoryFilter === "geometric")
+                    return item.category === "geometric" || item.category === "motion";
+                  return true;
+                }).map((item) => {
+                  const audioTag =
+                    item.id === "whip_pan"
+                      ? "Whoosh SFX"
+                      : item.id === "flash_white"
+                      ? "Light Leak SFX"
+                      : item.id === "dip_black"
+                      ? "Sub Boom SFX"
+                      : item.id === "zoom_crash"
+                      ? "Impact 808"
+                      : item.id === "glitch_slice"
+                      ? "Digital Noise SFX"
+                      : item.id === "slide_left"
+                      ? "Snap Push SFX"
+                      : item.id === "cross_dissolve"
+                      ? "Air Swoosh SFX"
+                      : "Vortex Whoosh SFX";
+
+                  return (
+                    <div
+                      key={item.id}
+                      onMouseEnter={() => setHoveredEffectId(item.id)}
+                      onMouseLeave={() => setHoveredEffectId(null)}
+                      className="group relative p-3 rounded-xl bg-[#14141d] hover:bg-[#191926] border border-white/5 hover:border-cyan-500/40 transition-all flex flex-col justify-between gap-2.5 shadow-sm"
+                    >
+                      {/* Animated Micro-Preview Thumbnail */}
+                      <div className="relative w-full h-16 rounded-lg overflow-hidden bg-[#0c0c12] border border-white/5 flex items-center justify-center group-hover:border-cyan-500/30 transition-all">
+                        {/* Dynamic visual preview per effect */}
+                        {item.id === "whip_pan" && (
+                          <div className="absolute inset-0 flex items-center">
+                            <div className="w-full h-8 bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent blur-sm -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out" />
+                          </div>
+                        )}
+                        {item.id === "flash_white" && (
+                          <div className="absolute inset-0 bg-white opacity-0 group-hover:opacity-90 transition-opacity duration-200" />
+                        )}
+                        {item.id === "dip_black" && (
+                          <div className="absolute inset-0 bg-black opacity-0 group-hover:opacity-95 transition-opacity duration-300" />
+                        )}
+                        {item.id === "zoom_crash" && (
+                          <div className="absolute inset-0 border-2 border-violet-500/40 rounded-lg group-hover:scale-150 group-hover:opacity-0 transition-all duration-400" />
+                        )}
+                        {item.id === "glitch_slice" && (
+                          <>
+                            <div className="absolute inset-x-0 h-2 top-3 bg-cyan-400/40 -translate-x-2 group-hover:translate-x-3 transition-transform duration-150 mix-blend-screen" />
+                            <div className="absolute inset-x-0 h-2 bottom-3 bg-rose-500/40 translate-x-2 group-hover:-translate-x-3 transition-transform duration-150 mix-blend-screen" />
+                          </>
+                        )}
+                        {item.id === "slide_left" && (
+                          <div className="absolute inset-y-0 w-full flex">
+                            <div className="w-1/2 h-full bg-cyan-950/40 border-r border-cyan-400/40 group-hover:-translate-x-full transition-transform duration-500" />
+                            <div className="w-1/2 h-full bg-violet-950/40 group-hover:-translate-x-full transition-transform duration-500" />
+                          </div>
+                        )}
+                        {item.id === "cross_dissolve" && (
+                          <div className="absolute inset-0 bg-gradient-to-tr from-cyan-600/30 via-indigo-600/30 to-purple-600/30 opacity-20 group-hover:opacity-80 transition-opacity duration-500" />
+                        )}
+                        {item.id === "spin_roll" && (
+                          <div className="absolute w-10 h-10 rounded-full border border-dashed border-cyan-400/40 group-hover:rotate-180 transition-transform duration-500" />
+                        )}
+                        <span className="text-2xl filter drop-shadow z-10 select-none group-hover:scale-110 transition-transform">
+                          {item.iconEmoji}
+                        </span>
+                      </div>
+
+                      {/* Info & Badges */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-white group-hover:text-cyan-300 transition-colors">
+                            {item.name}
+                          </span>
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-semibold bg-white/5 text-zinc-400 border border-white/5">
+                            {item.defaultDuration}s
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-zinc-400 line-clamp-1 leading-snug">
+                          {item.tagline}
+                        </p>
+
+                        {/* Audio sync tag with preview click */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playProceduralSfx(item.sfxCue || "whoosh");
+                          }}
+                          className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-cyan-950/40 hover:bg-cyan-900/50 text-cyan-300 border border-cyan-500/20 transition-colors cursor-pointer group/sfx"
+                          title="Click to preview synchronized SFX"
+                        >
+                          <Volume2 className="h-2.5 w-2.5 text-cyan-400 group-hover/sfx:scale-110" />
+                          <span>{audioTag}</span>
+                        </button>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-white/5">
+                        <button
+                          onClick={() => {
+                            if (onApplyTransitionToAll) {
+                              onApplyTransitionToAll(item.id, transitionDuration);
+                            } else {
+                              const points = cuts.map((c) => c.start);
+                              if (points.length === 0 && duration > 2) {
+                                points.push(duration * 0.33, duration * 0.66);
+                              }
+                              const created = points.map((pt, i) => ({
+                                id: `tr-bulk-${i}-${Date.now().toString(36)}`,
+                                timestamp: parseFloat(pt.toFixed(2)),
+                                effect: item.id,
+                                duration: transitionDuration,
+                                aiSuggested: false,
+                                aiReason: `Bulk Applied ${item.name}`,
+                              }));
+                              onUpdateTransitions?.(created);
+                              playProceduralSfx(item.sfxCue || "whoosh");
+                            }
+                          }}
+                          className="py-1 px-2 rounded-lg text-[10px] font-semibold text-cyan-300 hover:text-white bg-cyan-600/15 hover:bg-cyan-600 border border-cyan-500/30 hover:border-transparent transition-all cursor-pointer text-center truncate shadow-sm"
+                          title="Apply this transition to every cut seam"
+                        >
+                          Apply to All
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            if (onApplyTransitionToCut) {
+                              onApplyTransitionToCut(currentTime, item.id, transitionDuration);
+                            } else {
+                              const filtered = transitions.filter(
+                                (t) => Math.abs(t.timestamp - currentTime) > 0.35
+                              );
+                              const newTrans = {
+                                id: `tr-manual-${Date.now().toString(36)}`,
+                                timestamp: parseFloat(currentTime.toFixed(2)),
+                                effect: item.id,
+                                duration: transitionDuration,
+                                aiSuggested: false,
+                              };
+                              onUpdateTransitions?.(
+                                [...filtered, newTrans].sort((a, b) => a.timestamp - b.timestamp)
+                              );
+                              playProceduralSfx(item.sfxCue || "whoosh");
+                            }
+                          }}
+                          className="py-1 px-2 rounded-lg text-[10px] font-semibold text-zinc-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/5 transition-all cursor-pointer text-center truncate"
+                          title="Apply this transition at current playhead seam"
+                        >
+                          At Playhead
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 4. Active Project Transitions List */}
+            <div className="space-y-2 pt-2 border-t border-white/5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-200 flex items-center gap-1.5">
+                  <span>Active Cut Transitions</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-white/10 text-zinc-300">
+                    {transitions.length}
+                  </span>
+                </span>
+                {transitions.length > 0 && (
+                  <button
+                    onClick={() => {
+                      onUpdateTransitions?.([]);
+                      onSelectTransition?.(null);
+                    }}
+                    className="text-[10px] text-zinc-400 hover:text-rose-400 transition-colors cursor-pointer"
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
+
+              {transitions.length === 0 ? (
+                <div className="p-4 rounded-xl bg-[#14141d] border border-dashed border-white/10 text-center flex flex-col items-center justify-center gap-1.5">
+                  <span className="text-2xl">🌀</span>
+                  <span className="text-xs font-semibold text-zinc-300">No transitions added yet</span>
+                  <p className="text-[10px] text-zinc-500 max-w-[200px]">
+                    Click &quot;⚡ AI Auto-Match Transitions&quot; or select an effect from the catalog above to assign to your cut seams.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {transitions.map((t) => {
+                    const cfg = TRANSITION_CONFIG_MAP[t.effect] || {
+                      name: t.effect,
+                      iconEmoji: "🌀",
+                    };
+                    const isSelected = selectedTransitionId === t.id;
+
+                    return (
+                      <div
+                        key={t.id}
+                        onClick={() => onSelectTransition?.(t.id)}
+                        className={`p-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                          isSelected
+                            ? "bg-cyan-950/30 border-cyan-500/50 shadow-md shadow-cyan-950/40"
+                            : "bg-[#14141d] hover:bg-[#181824] border-white/5"
+                        }`}
+                      >
+                        {/* Timecode + Effect Icon & Name */}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSeekToWord(t.timestamp);
+                            }}
+                            className="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold bg-[#1b1b26] hover:bg-cyan-600/30 hover:text-cyan-300 text-zinc-300 border border-white/5 transition-colors cursor-pointer shrink-0"
+                            title="Click to seek playhead to this transition"
+                          >
+                            {formatTimecode(t.timestamp)}
+                          </button>
+
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="text-sm shrink-0">{cfg.iconEmoji}</span>
+                            <span className="text-xs font-semibold text-white truncate">
+                              {cfg.name}
+                            </span>
+                            <span className="text-[9px] font-mono text-zinc-400 shrink-0">
+                              {t.duration.toFixed(2)}s
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* AI Reason Badge & Actions */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {t.aiSuggested && (
+                            <span
+                              className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-cyan-950/50 text-cyan-300 border border-cyan-500/30 hidden xs:inline-block max-w-[120px] truncate"
+                              title={t.aiReason}
+                            >
+                              ⚡ {t.aiReason ? t.aiReason.replace("High-energy hook exclamation", "Hook").replace("Transitional topic shift", "Topic").replace("Jump cut seam boundary", "Seam") : "AI"}
+                            </span>
+                          )}
+
+                          {/* Quick effect changer select */}
+                          <select
+                            value={t.effect}
+                            onChange={(e) => {
+                              const newEffect = e.target.value as TransitionEffectId;
+                              const updated = transitions.map((item) =>
+                                item.id === t.id ? { ...item, effect: newEffect } : item
+                              );
+                              onUpdateTransitions?.(updated);
+                              playProceduralSfx("whoosh");
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="bg-[#181824] text-zinc-300 text-[10px] rounded px-1 py-0.5 border border-white/10 focus:outline-none focus:border-cyan-400 cursor-pointer"
+                          >
+                            {TRANSITION_EFFECTS_CATALOG.map((ef) => (
+                              <option key={ef.id} value={ef.id}>
+                                {ef.iconEmoji} {ef.name}
+                              </option>
+                            ))}
+                          </select>
+
+                          {/* Remove button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onRemoveTransition) {
+                                onRemoveTransition(t.id);
+                              } else {
+                                onUpdateTransitions?.(transitions.filter((item) => item.id !== t.id));
+                              }
+                            }}
+                            className="p-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                            title="Remove this transition"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* FLOATING AI COPILOT COMMAND BAR AT BOTTOM */}

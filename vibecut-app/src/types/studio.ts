@@ -42,9 +42,57 @@ export interface TranscriptionState {
   duration?: number;
 }
 
-export type StudioTab = "transcript" | "ingestion" | "silence" | "captions" | "audio" | "presets";
+export type StudioTab = "transcript" | "ingestion" | "silence" | "captions" | "audio" | "presets" | "transitions";
 
-export type ActivityRailTab = "media" | "subtitles" | "silence" | "broll" | "audio" | "presets";
+export type ActivityRailTab = "media" | "subtitles" | "silence" | "broll" | "audio" | "presets" | "transitions";
+
+export type TransitionEffectId =
+  | "cross_dissolve"
+  | "whip_pan"
+  | "flash_white"
+  | "dip_black"
+  | "zoom_crash"
+  | "glitch_slice"
+  | "slide_left"
+  | "spin_roll";
+
+export interface TransitionItem {
+  id: string;
+  timestamp: number;
+  effect: TransitionEffectId;
+  duration: number; // e.g. 0.3s
+  aiSuggested?: boolean;
+  aiReason?: string;
+}
+
+export type TransitionCategory = "cinematic" | "dynamic" | "glitch" | "motion" | "geometric";
+
+export interface TransitionEffectConfig {
+  id: TransitionEffectId;
+  name: string;
+  category: TransitionCategory;
+  tagline: string;
+  iconEmoji: string;
+  defaultDuration: number;
+  sfxCue: SfxCueId;
+  description: string;
+  tags?: string[];
+}
+
+export interface AITransitionRecommendation {
+  timestamp: number;
+  effect: TransitionEffectId;
+  duration: number;
+  reason: string;
+  confidence: number;
+  triggerType: "scene_change" | "energy_spike" | "tech_keyword" | "silence_gap" | "cut_boundary";
+}
+
+export interface ActiveTransitionState {
+  active: boolean;
+  transition: TransitionItem | null;
+  progress: number;
+}
 
 export type SfxCueId = "whoosh" | "boom" | "ding" | "bell" | "pop" | "cash" | "glitch" | "tape_click" | "tape";
 export type SFXSoundId = SfxCueId;

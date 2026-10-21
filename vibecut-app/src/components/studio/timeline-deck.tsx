@@ -24,7 +24,19 @@ import {
   Camera,
   Layers,
 } from "lucide-react";
-import { StudioWord, TimelineCut, PunchZoomInterval, VFXFilterId } from "@/types/studio";
+import {
+  StudioWord,
+  TimelineCut,
+  PunchZoomInterval,
+  VFXFilterId,
+  TransitionItem,
+  TransitionEffectId,
+} from "@/types/studio";
+import {
+  TRANSITION_EFFECTS_CATALOG,
+  TRANSITION_CONFIG_MAP,
+} from "@/lib/transitions-engine";
+import { playProceduralSfx } from "@/lib/vfx-sfx-engine";
 import { formatTimecode } from "@/lib/studio-utils";
 
 interface TimelineDeckProps {
@@ -39,6 +51,13 @@ interface TimelineDeckProps {
   silenceCount?: number;
   punchZoomIntervals?: PunchZoomInterval[];
   activeVFXFilter?: VFXFilterId;
+  transitions?: TransitionItem[];
+  selectedTransitionId?: string | null;
+  onSelectTransition?: (idOrTrans: string | TransitionItem | null) => void;
+  onUpdateTransitions?: (transitions: TransitionItem[]) => void;
+  onAddOrChangeTransitionAtTime?: (time: number, effect: TransitionEffectId, duration?: number) => void;
+  onRemoveTransition?: (id: string) => void;
+  onOpenTransitionsTab?: () => void;
 }
 
 export function TimelineDeck({
@@ -53,6 +72,13 @@ export function TimelineDeck({
   silenceCount = 14,
   punchZoomIntervals = [],
   activeVFXFilter = "none",
+  transitions = [],
+  selectedTransitionId: propSelectedTransitionId,
+  onSelectTransition,
+  onUpdateTransitions,
+  onAddOrChangeTransitionAtTime,
+  onRemoveTransition,
+  onOpenTransitionsTab,
 }: TimelineDeckProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -66,6 +92,16 @@ export function TimelineDeck({
   const [activeSnapPoint, setActiveSnapPoint] = useState<number | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>("main-clip-0");
   const [selectedTransitionId, setSelectedTransitionId] = useState<string | null>(null);
+  const [activePopoverSeamId, setActivePopoverSeamId] = useState<string | null>(null);
+
+  // Close popover on Escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setActivePopoverSeamId(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Track Sovereignty Controls (Premiere Pro Track Headers)
   const [trackStates, setTrackStates] = useState({
@@ -299,6 +335,44 @@ export function TimelineDeck({
 
     return { cutZones: mergedZones, splitLines: splits, videoClips: clips };
   }, [words, cuts, validDuration]);
+
+  // All cut seam points where transitions can exist (cuts + transitions)
+  const seamNodes = useMemo(() => {
+    const list: {
+      id: string;
+      timestamp: number;
+      transition?: TransitionItem;
+    }[] = [];
+
+    const processedTransitions = new Set<string>();
+
+    // 1. Add all split cuts
+    splitLines.forEach((split) => {
+      const matchingTr = transitions.find(
+        (t) => Math.abs(t.timestamp - split.start) <= 0.35
+      );
+      if (matchingTr) processedTransitions.add(matchingTr.id);
+      list.push({
+        id: split.id,
+        timestamp: split.start,
+        transition: matchingTr,
+      });
+    });
+
+    // 2. Add any active transitions not on exact split lines
+    transitions.forEach((t) => {
+      if (!processedTransitions.has(t.id)) {
+        list.push({
+          id: t.id,
+          timestamp: t.timestamp,
+          transition: t,
+        });
+      }
+    });
+
+    return list.sort((a, b) => a.timestamp - b.timestamp);
+  }, [splitLines, transitions]);
+
 
   // Audio waveform generator with speech density
   const waveformBars = useMemo(() => {
@@ -853,28 +927,162 @@ export function TimelineDeck({
             })}
 
             {/* VN Transition Seam Nodes between clips */}
-            {splitLines.map((split, i) => {
-              const leftPercent = (split.start / validDuration) * 100;
+            {seamNodes.map((seam, i) => {
+              const leftPercent = (seam.timestamp / validDuration) * 100;
+              const tr = seam.transition;
+              const cfg = tr ? (TRANSITION_CONFIG_MAP[tr.effect] || { name: tr.effect, iconEmoji: "🌀" }) : null;
+              const isPopoverOpen = activePopoverSeamId === seam.id;
+              const tooltipText = tr
+                ? `Transition: ${cfg?.name || "Transition"} (${tr.duration.toFixed(1)}s)${tr.aiSuggested ? " [AI Auto-Matched]" : ""}`
+                : `Cut Seam at ${formatTimecode(seam.timestamp)} - Click to add transition`;
+
               return (
                 <div
-                  key={split.id}
-                  className="absolute top-0 bottom-0 z-30 flex items-center justify-center -translate-x-1/2 pointer-events-auto"
+                  key={seam.id}
+                  className="absolute top-0 bottom-0 z-30 flex items-center justify-center -translate-x-1/2 pointer-events-auto group/seam"
                   style={{ left: `${leftPercent}%` }}
                 >
                   {/* Seam Cut Line */}
-                  <div className="w-[2px] h-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]" />
+                  <div
+                    className={`w-[2px] h-full transition-all ${
+                      tr
+                        ? "bg-cyan-400 shadow-[0_0_10px_rgba(6,182,212,0.9)]"
+                        : "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]"
+                    }`}
+                  />
 
                   {/* VN Transition Pill Icon */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedTransitionId(`trans-${i}`);
+                      if (tr) {
+                        onSelectTransition?.(tr.id);
+                      }
+                      setActivePopoverSeamId(isPopoverOpen ? null : seam.id);
                     }}
-                    className="absolute w-4 h-4 rounded bg-amber-400 text-black hover:scale-125 transition-transform flex items-center justify-center shadow-md font-mono text-[9px] font-black cursor-pointer"
-                    title="Transition: Crossfade / Dip to Black"
+                    className={`absolute w-5 h-5 rounded-lg flex items-center justify-center shadow-lg transition-transform hover:scale-125 cursor-pointer font-bold select-none ${
+                      tr
+                        ? tr.aiSuggested
+                          ? "bg-gradient-to-tr from-cyan-400 to-indigo-500 text-black border border-cyan-200 shadow-cyan-500/50 text-[10px]"
+                          : "bg-cyan-400 text-black border border-cyan-300 shadow-cyan-400/50 text-[10px]"
+                        : "bg-[#181822] text-zinc-400 hover:text-cyan-300 border border-white/20 hover:border-cyan-400 text-[10px]"
+                    }`}
+                    title={tooltipText}
                   >
-                    ⋈
+                    {tr ? cfg?.iconEmoji : "⋈"}
                   </button>
+
+                  {/* Inline Mini-Picker Popover */}
+                  {isPopoverOpen && (
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50 w-72 rounded-2xl bg-[#101016]/95 backdrop-blur-xl border border-cyan-500/30 p-3 shadow-2xl shadow-black flex flex-col gap-2.5 animate-in fade-in zoom-in-95 pointer-events-auto"
+                    >
+                      {/* Header */}
+                      <div className="flex items-center justify-between pb-1.5 border-b border-white/10">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs">⚡</span>
+                          <span className="text-xs font-bold text-white">Cut Seam Transition</span>
+                          <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-300">
+                            {formatTimecode(seam.timestamp)}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setActivePopoverSeamId(null)}
+                          className="p-1 text-zinc-400 hover:text-white rounded-md transition-colors cursor-pointer text-xs"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      {/* Current transition status */}
+                      {tr && (
+                        <div className="p-2 rounded-xl bg-cyan-950/30 border border-cyan-500/20 flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-base">{cfg?.iconEmoji}</span>
+                            <div>
+                              <span className="text-xs font-bold text-cyan-300 block leading-tight">{cfg?.name}</span>
+                              <span className="text-[9px] text-zinc-400">{tr.duration}s {tr.aiSuggested ? "• AI Auto-Matched" : ""}</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              if (onRemoveTransition) {
+                                onRemoveTransition(tr.id);
+                              } else {
+                                onUpdateTransitions?.(transitions.filter((t) => t.id !== tr.id));
+                              }
+                              playProceduralSfx("whoosh");
+                              setActivePopoverSeamId(null);
+                            }}
+                            className="text-[10px] text-zinc-400 hover:text-rose-400 p-1 transition-colors cursor-pointer"
+                            title="Remove transition"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Quick-Swap 8 Transitions Grid */}
+                      <div>
+                        <span className="text-[10px] font-semibold text-zinc-400 block mb-1.5 uppercase tracking-wider">
+                          Swap Effect
+                        </span>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {TRANSITION_EFFECTS_CATALOG.map((ef) => {
+                            const isActive = tr?.effect === ef.id;
+                            return (
+                              <button
+                                key={ef.id}
+                                onClick={() => {
+                                  if (onAddOrChangeTransitionAtTime) {
+                                    onAddOrChangeTransitionAtTime(seam.timestamp, ef.id, ef.defaultDuration);
+                                  } else if (onUpdateTransitions) {
+                                    const filtered = transitions.filter(
+                                      (t) => Math.abs(t.timestamp - seam.timestamp) > 0.35
+                                    );
+                                    const newTr: TransitionItem = {
+                                      id: tr?.id || `tr-seam-${Date.now().toString(36)}`,
+                                      timestamp: parseFloat(seam.timestamp.toFixed(2)),
+                                      effect: ef.id,
+                                      duration: ef.defaultDuration,
+                                      aiSuggested: false,
+                                    };
+                                    onUpdateTransitions([...filtered, newTr].sort((a, b) => a.timestamp - b.timestamp));
+                                  }
+                                  playProceduralSfx(ef.sfxCue || "whoosh");
+                                  setActivePopoverSeamId(null);
+                                }}
+                                className={`p-1.5 rounded-xl border flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+                                  isActive
+                                    ? "bg-cyan-500/25 border-cyan-400 text-cyan-300 shadow-sm"
+                                    : "bg-[#181824] hover:bg-[#202030] border-white/5 text-zinc-300 hover:text-white"
+                                }`}
+                                title={`${ef.name} (${ef.tagline})`}
+                              >
+                                <span className="text-base">{ef.iconEmoji}</span>
+                                <span className="text-[9px] font-semibold truncate max-w-[50px]">{ef.name.split(" ")[0]}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Open Transitions in Inspector Button */}
+                      {onOpenTransitionsTab && (
+                        <button
+                          onClick={() => {
+                            onOpenTransitionsTab();
+                            setActivePopoverSeamId(null);
+                          }}
+                          className="w-full py-1 px-2 rounded-lg text-[10px] font-semibold text-cyan-300 hover:text-white bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-500/30 transition-all cursor-pointer text-center"
+                        >
+                          Configure All in Transitions Tab →
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

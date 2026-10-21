@@ -27,10 +27,11 @@ export async function POST(req: NextRequest) {
       template,
       vfxSettings,
       punchZoomCadence,
+      transitions,
     } = body;
 
     let finalEdl = edl || null;
-    if (captionSettings || template || vfxSettings || punchZoomCadence) {
+    if (captionSettings || template || vfxSettings || punchZoomCadence || transitions) {
       if (!finalEdl) {
         finalEdl = {};
       }
@@ -48,6 +49,9 @@ export async function POST(req: NextRequest) {
       }
       if (punchZoomCadence && !finalEdl.punchZoomCadence) {
         finalEdl.punchZoomCadence = punchZoomCadence;
+      }
+      if (transitions && !finalEdl.transitions) {
+        finalEdl.transitions = transitions;
       }
     }
 
@@ -286,6 +290,7 @@ export async function GET(req: NextRequest) {
         template: latestEdlPayload?.template || null,
         vfxSettings: latestEdlPayload?.vfxSettings || null,
         punchZoomCadence: latestEdlPayload?.punchZoomCadence || null,
+        transitions: latestEdlPayload?.transitions || [],
         videoStreamUrl,
       };
     };
@@ -408,7 +413,7 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, title, aspect_ratio, edl, captionSettings, applied_prompt, template, vfxSettings, punchZoomCadence } = body;
+    const { id, title, aspect_ratio, edl, captionSettings, applied_prompt, template, vfxSettings, punchZoomCadence, transitions } = body;
 
     if (!id) {
       return NextResponse.json({ error: "Project ID is required" }, { status: 400 });
@@ -435,7 +440,7 @@ export async function PATCH(req: NextRequest) {
     if (error) throw error;
 
     let finalEdl = edl || null;
-    if (captionSettings || template || vfxSettings || punchZoomCadence) {
+    if (captionSettings || template || vfxSettings || punchZoomCadence || transitions) {
       if (!finalEdl) {
         finalEdl = {};
       }
@@ -453,6 +458,9 @@ export async function PATCH(req: NextRequest) {
       }
       if (punchZoomCadence && !finalEdl.punchZoomCadence) {
         finalEdl.punchZoomCadence = punchZoomCadence;
+      }
+      if (transitions && !finalEdl.transitions) {
+        finalEdl.transitions = transitions;
       }
     }
 

@@ -8,6 +8,7 @@ import {
   Film,
   Sliders,
   Wand2,
+  Layers,
   FolderKanban,
   HelpCircle,
   Settings,
@@ -32,9 +33,10 @@ const RAIL_ITEMS: RailItem[] = [
   { id: "media", label: "Media & Cloud", icon: Video, shortcut: "⌥1" },
   { id: "subtitles", label: "Kinetic Captions", icon: Type, badge: "AI", shortcut: "⌥2" },
   { id: "silence", label: "Silence Surgery", icon: Scissors, badge: "Auto", shortcut: "⌥3" },
-  { id: "broll", label: "B-Roll & Overlays", icon: Film, shortcut: "⌥4" },
-  { id: "audio", label: "Audio & Ducking", icon: Sliders, shortcut: "⌥5" },
-  { id: "presets", label: "Viral Presets", icon: Wand2, shortcut: "⌥6" },
+  { id: "transitions", label: "Transitions & FX", icon: Layers, badge: "FX", shortcut: "⌥4" },
+  { id: "broll", label: "B-Roll & Overlays", icon: Film, shortcut: "⌥5" },
+  { id: "audio", label: "Audio & Ducking", icon: Sliders, shortcut: "⌥6" },
+  { id: "presets", label: "Viral Presets", icon: Wand2, shortcut: "⌥7" },
 ];
 
 export function StudioActivityRail({
