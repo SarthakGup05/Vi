@@ -232,6 +232,13 @@ export default function ProjectsPage() {
 
       const newProj = await createRes.json();
       if (newProj?.id) {
+        // Cache local object URL in sessionStorage for instant 0ms latency in studio
+        try {
+          const localBlobUrl = URL.createObjectURL(file);
+          sessionStorage.setItem(`vibecut_local_video_${newProj.id}`, localBlobUrl);
+        } catch {
+          // ignore storage quota error
+        }
         // Redirect directly into the Studio with this newly created project
         router.push(`/studio?id=${newProj.id}`);
       } else {

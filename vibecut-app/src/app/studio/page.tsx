@@ -111,9 +111,21 @@ function StudioContent() {
       setAspectRatio((proj.aspect_ratio as AspectRatioMode) || "9:16");
       setDuration(proj.duration_seconds || 0);
 
-      // Hydrate presigned S3 video stream URL
-      if (proj.videoStreamUrl) {
-        setVideoSrc(proj.videoStreamUrl);
+      // Hydrate presigned S3 video stream URL (prefer local blob URL for instant 0ms playback if uploaded this session)
+      let activeStreamUrl = proj.videoStreamUrl || null;
+      if (typeof window !== "undefined") {
+        try {
+          const cachedBlob = sessionStorage.getItem(`vibecut_local_video_${projId}`);
+          if (cachedBlob) {
+            activeStreamUrl = cachedBlob;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (activeStreamUrl) {
+        setVideoSrc(activeStreamUrl);
       }
 
       // Populate S3 upload state without redundant uploads
@@ -806,6 +818,18 @@ function StudioContent() {
                 captionStyle={captionStyle}
                 showCaptions={showCaptions}
                 onToggleCaptions={() => setShowCaptions(!showCaptions)}
+                onAttachLocalFile={(file) => {
+                  const url = URL.createObjectURL(file);
+                  setVideoSrc(url);
+                  if (activeProjectId) {
+                    try {
+                      sessionStorage.setItem(`vibecut_local_video_${activeProjectId}`, url);
+                    } catch {
+                      // ignore
+                    }
+                  }
+                  showToast(`Attached local file "${file.name}" for instant playback`);
+                }}
               />
             )}
           </div>

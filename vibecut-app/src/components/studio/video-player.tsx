@@ -20,6 +20,8 @@ import {
   EyeOff,
   Sparkles,
   AlertCircle,
+  RotateCw,
+  UploadCloud,
 } from "lucide-react";
 import { formatTimecode } from "@/lib/studio-utils";
 import { AspectRatioMode, StudioWord, CaptionStyle, TimelineCut } from "@/types/studio";
@@ -35,6 +37,7 @@ interface VideoPlayerProps {
   captionStyle?: CaptionStyle;
   showCaptions?: boolean;
   onToggleCaptions?: () => void;
+  onAttachLocalFile?: (file: File) => void;
 }
 
 export function VideoPlayer({
@@ -48,9 +51,11 @@ export function VideoPlayer({
   captionStyle = "hormozi",
   showCaptions = true,
   onToggleCaptions,
+  onAttachLocalFile,
 }: VideoPlayerProps) {
   const localRef = useRef<HTMLVideoElement | null>(null);
   const videoRef = externalRef || localRef;
+  const localFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -65,6 +70,22 @@ export function VideoPlayer({
   const [showSafeArea, setShowSafeArea] = useState(false);
   const [captionsVisible, setCaptionsVisible] = useState(showCaptions);
   const [videoError, setVideoError] = useState<string | null>(null);
+
+  // Clear errors and reload when src changes
+  useEffect(() => {
+    setVideoError(null);
+    if (videoRef.current && src) {
+      videoRef.current.load();
+    }
+  }, [src, videoRef]);
+
+  const handleRetryStream = () => {
+    setVideoError(null);
+    if (videoRef.current) {
+      videoRef.current.load();
+      videoRef.current.play().catch(() => {});
+    }
+  };
 
   // Prevent repeated seek triggers on the same skip target
   const lastSkippedTimeRef = useRef<number>(-1);
@@ -365,44 +386,86 @@ export function VideoPlayer({
           </div>
         )}
 
+        {/* Hidden file input for attaching local file directly */}
+        <input
+          ref={localFileInputRef}
+          type="file"
+          accept="video/*"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f && onAttachLocalFile) {
+              setVideoError(null);
+              onAttachLocalFile(f);
+            }
+          }}
+        />
+
         {/* Video Element */}
         <video
           ref={videoRef}
           src={src}
           className="w-full h-full object-contain cursor-pointer"
           playsInline
+          preload="auto"
           onClick={togglePlay}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={() => {
             setVideoError(null);
             handleLoadedMetadata();
           }}
+          onCanPlay={() => {
+            setVideoError(null);
+          }}
           onError={() => {
+            // If duration already loaded or video has frames, ignore transient network skips
+            if (duration > 0 || (videoRef.current && videoRef.current.readyState >= 1)) {
+              return;
+            }
             const err = videoRef.current?.error;
             console.warn("Video stream load notice:", err?.code, err?.message);
-            if (err?.code === 4) {
-              setVideoError("Video stream unavailable or codec not supported in current browser session.");
-            } else if (err?.code === 2) {
-              setVideoError("Network interrupted while streaming video from S3.");
-            } else {
-              setVideoError("Video stream could not be loaded.");
-            }
+            setVideoError("Cloud video stream buffering or reconnecting.");
           }}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
         />
 
-        {/* Video Error Fallback Card */}
+        {/* Video Error Fallback Card with Interactive Recovery */}
         {videoError && (
-          <div className="absolute inset-0 z-30 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center select-none">
+          <div className="absolute inset-0 z-30 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center select-none animate-in fade-in duration-150">
             <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mb-3">
               <AlertCircle className="h-6 w-6 text-amber-400" />
             </div>
             <h4 className="text-sm font-bold text-white mb-1">Stream Notice</h4>
-            <p className="text-xs text-zinc-400 max-w-xs mb-3 leading-relaxed">{videoError}</p>
-            <span className="text-[11px] font-mono text-zinc-500">
-              Drag and drop video in stage or reload to reconnect
-            </span>
+            <p className="text-xs text-zinc-400 max-w-xs mb-4 leading-relaxed">{videoError}</p>
+
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                onClick={handleRetryStream}
+                className="px-3.5 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-violet-600/30 transition-all cursor-pointer active:scale-95"
+              >
+                <RotateCw className="h-3.5 w-3.5" />
+                <span>Retry Stream</span>
+              </button>
+
+              {onAttachLocalFile && (
+                <button
+                  onClick={() => localFileInputRef.current?.click()}
+                  className="px-3.5 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.14] text-zinc-200 text-xs font-semibold flex items-center gap-1.5 border border-white/10 transition-all cursor-pointer active:scale-95"
+                >
+                  <UploadCloud className="h-3.5 w-3.5 text-amber-400" />
+                  <span>Choose Local File</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setVideoError(null)}
+                className="px-2.5 py-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 text-xs transition-colors cursor-pointer"
+                title="Dismiss notice"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
 
