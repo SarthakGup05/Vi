@@ -310,7 +310,9 @@ function StudioContent() {
 
       const xhr = new XMLHttpRequest();
       xhr.open("PUT", data.uploadUrl, true);
-      xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
+      if (file.type) {
+        xhr.setRequestHeader("Content-Type", file.type);
+      }
 
       xhr.upload.onprogress = (evt) => {
         if (evt.lengthComputable) {

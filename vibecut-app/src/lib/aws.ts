@@ -35,15 +35,16 @@ export function isAwsConfigured(): boolean {
  * Generate a pre-signed URL for direct browser-to-S3 video upload.
  * This completely bypasses the 4.5MB Next.js / Vercel body size limit.
  */
-export async function getPresignedUploadUrl(fileName: string, contentType: string, expiresInSeconds = 900) {
+export async function getPresignedUploadUrl(fileName: string, contentType?: string, expiresInSeconds = 900) {
   const s3 = getS3Client();
   const bucketName = process.env.AWS_S3_BUCKET_NAME?.trim() || "vibecut-storage-2026";
   const fileKey = `raw-uploads/${Date.now()}-${fileName.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
   
+  // Omit ContentType restriction from PutObjectCommand so browser uploads
+  // never fail with 403 SignatureDoesNotMatch due to MIME type differences.
   const command = new PutObjectCommand({
     Bucket: bucketName,
     Key: fileKey,
-    ContentType: contentType,
   });
 
   const uploadUrl = await getSignedUrl(s3, command, { expiresIn: expiresInSeconds });

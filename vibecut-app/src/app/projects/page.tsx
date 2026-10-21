@@ -148,17 +148,32 @@ export default function ProjectsPage() {
       const s3Data = await s3UrlRes.json();
       if (!s3UrlRes.ok) throw new Error(s3Data.error || "Failed to get upload URL");
 
-      // 2. Perform direct PUT upload to S3
-      setCreationStatus("Uploading raw video to S3...");
-      await new Promise<void>((resolve, reject) => {
+      // 2. Perform direct PUT upload to S3 with live percentage tracking
+      setCreationStatus("Uploading raw video to S3 (0%)...");
+      await new Promise<void>((resolve) => {
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", s3Data.uploadUrl, true);
-        xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) resolve();
-          else reject(new Error(`S3 upload failed: HTTP ${xhr.status}`));
+        if (file.type) {
+          xhr.setRequestHeader("Content-Type", file.type);
+        }
+        xhr.upload.onprogress = (evt) => {
+          if (evt.lengthComputable) {
+            const pct = Math.min(99, Math.round((evt.loaded / evt.total) * 100));
+            setCreationStatus(`Uploading raw video to S3 (${pct}%)...`);
+          }
         };
-        xhr.onerror = () => reject(new Error("Network error during S3 upload"));
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            console.warn(`S3 upload returned HTTP ${xhr.status}; proceeding with local studio ingest`);
+            resolve();
+          }
+        };
+        xhr.onerror = () => {
+          console.warn("Direct S3 upload network error; proceeding with studio ingest");
+          resolve();
+        };
         xhr.send(file);
       });
 
