@@ -572,7 +572,7 @@ function StudioContent() {
         body: JSON.stringify({
           projectId: activeProjectId.startsWith("proj-") ? undefined : activeProjectId,
           title: projectName,
-          raw_video_s3_key: s3State.fileKey || `videos/${projectName}`,
+          raw_video_s3_key: s3State.fileKey || (activeProjectId ? undefined : `raw-uploads/${Date.now()}-${projectName}`),
           file_size_bytes: metadata?.fileSize || 1024 * 1024,
           aspect_ratio: aspectRatio,
           width: metadata?.width || (aspectRatio === "9:16" ? 1080 : 1920),

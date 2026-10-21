@@ -19,6 +19,7 @@ import {
   Eye,
   EyeOff,
   Sparkles,
+  AlertCircle,
 } from "lucide-react";
 import { formatTimecode } from "@/lib/studio-utils";
 import { AspectRatioMode, StudioWord, CaptionStyle, TimelineCut } from "@/types/studio";
@@ -63,6 +64,7 @@ export function VideoPlayer({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showSafeArea, setShowSafeArea] = useState(false);
   const [captionsVisible, setCaptionsVisible] = useState(showCaptions);
+  const [videoError, setVideoError] = useState<string | null>(null);
 
   // Prevent repeated seek triggers on the same skip target
   const lastSkippedTimeRef = useRef<number>(-1);
@@ -166,17 +168,26 @@ export function VideoPlayer({
     setCaptionsVisible(showCaptions);
   }, [showCaptions]);
 
-  // Play / Pause toggle
+  // Play / Pause toggle with safe Promise handling
   const togglePlay = useCallback(() => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || !src || videoError) return;
     if (videoRef.current.paused) {
-      videoRef.current.play().catch(console.error);
-      setIsPlaying(true);
+      const playPromise = videoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+          })
+          .catch((err: unknown) => {
+            if (err instanceof Error && err.name === "AbortError") return;
+            console.warn("Playback interrupted or delayed:", err);
+          });
+      }
     } else {
       videoRef.current.pause();
       setIsPlaying(false);
     }
-  }, [videoRef]);
+  }, [videoRef, src, videoError]);
 
   // Keyboard shortcut: Spacebar toggles play/pause
   useEffect(() => {
@@ -360,16 +371,43 @@ export function VideoPlayer({
           src={src}
           className="w-full h-full object-contain cursor-pointer"
           playsInline
-          crossOrigin="anonymous"
           onClick={togglePlay}
           onTimeUpdate={handleTimeUpdate}
-          onLoadedMetadata={handleLoadedMetadata}
+          onLoadedMetadata={() => {
+            setVideoError(null);
+            handleLoadedMetadata();
+          }}
+          onError={() => {
+            const err = videoRef.current?.error;
+            console.warn("Video stream load notice:", err?.code, err?.message);
+            if (err?.code === 4) {
+              setVideoError("Video stream unavailable or codec not supported in current browser session.");
+            } else if (err?.code === 2) {
+              setVideoError("Network interrupted while streaming video from S3.");
+            } else {
+              setVideoError("Video stream could not be loaded.");
+            }
+          }}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
         />
 
+        {/* Video Error Fallback Card */}
+        {videoError && (
+          <div className="absolute inset-0 z-30 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center select-none">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mb-3">
+              <AlertCircle className="h-6 w-6 text-amber-400" />
+            </div>
+            <h4 className="text-sm font-bold text-white mb-1">Stream Notice</h4>
+            <p className="text-xs text-zinc-400 max-w-xs mb-3 leading-relaxed">{videoError}</p>
+            <span className="text-[11px] font-mono text-zinc-500">
+              Drag and drop video in stage or reload to reconnect
+            </span>
+          </div>
+        )}
+
         {/* Center Big Play Button Overlay on Pause */}
-        {!isPlaying && (
+        {!isPlaying && !videoError && (
           <button
             onClick={togglePlay}
             className="absolute z-20 w-16 h-16 rounded-full bg-violet-600/90 hover:bg-violet-500 text-white flex items-center justify-center shadow-2xl shadow-violet-600/50 hover:scale-110 active:scale-95 transition-all cursor-pointer backdrop-blur-sm"

@@ -25,9 +25,9 @@ export async function POST(req: NextRequest) {
       applied_prompt,
     } = body;
 
-    if (!raw_video_s3_key) {
+    if (!raw_video_s3_key && !projectId) {
       return NextResponse.json(
-        { error: "raw_video_s3_key is required" },
+        { error: "raw_video_s3_key is required for new projects" },
         { status: 400 }
       );
     }

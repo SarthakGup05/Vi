@@ -1,4 +1,10 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  HeadObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export function getS3Client() {
@@ -49,9 +55,31 @@ export async function getPresignedUploadUrl(fileName: string, contentType: strin
 }
 
 /**
- * Generate a pre-signed GET URL to stream or download private video assets.
+ * Verify whether an object actually exists in the S3 bucket.
  */
-export async function getPresignedDownloadUrl(fileKey: string, expiresInSeconds = 3600) {
+export async function checkS3ObjectExists(fileKey: string): Promise<boolean> {
+  if (!isAwsConfigured() || !fileKey) return false;
+  try {
+    const s3 = getS3Client();
+    const bucketName = process.env.AWS_S3_BUCKET_NAME?.trim() || "vibecut-storage-2026";
+    await s3.send(new HeadObjectCommand({ Bucket: bucketName, Key: fileKey }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Generate a pre-signed GET URL to stream or download private video assets.
+ * Returns null if the object does not exist in S3 to prevent HTML5 player 404 decodes.
+ */
+export async function getPresignedDownloadUrl(fileKey: string, expiresInSeconds = 3600): Promise<string | null> {
+  if (!isAwsConfigured() || !fileKey) return null;
+  const exists = await checkS3ObjectExists(fileKey);
+  if (!exists) {
+    console.warn(`S3 key "${fileKey}" does not exist in bucket; skipping signed URL generation`);
+    return null;
+  }
   const s3 = getS3Client();
   const bucketName = process.env.AWS_S3_BUCKET_NAME?.trim() || "vibecut-storage-2026";
   const command = new GetObjectCommand({
