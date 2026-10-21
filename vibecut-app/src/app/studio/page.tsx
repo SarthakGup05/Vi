@@ -507,7 +507,12 @@ function StudioContent() {
   const silenceCount = silenceGaps.length;
 
   // Auto-Cut All Silences: preserves manual cuts and creates timeline cuts for all detected pauses
-  const handleAutoCutSilences = useCallback((threshold: number = silenceThreshold) => {
+  const handleAutoCutSilences = useCallback((thresholdArg?: number | unknown) => {
+    const threshold =
+      typeof thresholdArg === "number" && !isNaN(thresholdArg)
+        ? thresholdArg
+        : silenceThreshold;
+
     const detected = detectSilenceGaps(words, duration, threshold, 0.05);
     if (detected.length > 0) {
       // Retain existing non-silence cuts

@@ -387,7 +387,7 @@ export function TimelineDeck({
 
           {/* Auto Silence Cut Action */}
           <button
-            onClick={onCutSilences}
+            onClick={() => onCutSilences?.()}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-amber-300 bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/30 transition-all cursor-pointer shadow-sm shadow-amber-500/10 active:scale-95"
             title="Detect and auto-trim silent pauses"
           >

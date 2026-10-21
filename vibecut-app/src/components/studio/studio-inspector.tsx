@@ -331,7 +331,7 @@ export function StudioInspector({
               {/* Action Bar with Cut All Fillers & Restore All Cuts */}
               <div className="flex items-center justify-between gap-1.5 flex-wrap">
                 <button
-                  onClick={onDeleteAllFillers}
+                  onClick={() => onDeleteAllFillers()}
                   disabled={fillerCount === 0}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                     fillerCount > 0
@@ -346,7 +346,7 @@ export function StudioInspector({
 
                 {deletedWordCount > 0 && (
                   <button
-                    onClick={onRestoreAllCuts}
+                    onClick={() => onRestoreAllCuts?.()}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold text-zinc-300 hover:text-white bg-[#181820] hover:bg-[#22222d] border border-white/10 transition-all cursor-pointer"
                     title="Restore all cuts in the transcript"
                   >
@@ -594,7 +594,7 @@ export function StudioInspector({
               {/* Action Button: Auto-Cut or Restore */}
               {uncutGaps.length > 0 ? (
                 <button
-                  onClick={onAutoCutSilences}
+                  onClick={() => onAutoCutSilences()}
                   className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-zinc-950 font-black text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer active:scale-95"
                 >
                   <Zap className="h-3.5 w-3.5 fill-current" />
@@ -604,7 +604,10 @@ export function StudioInspector({
                 </button>
               ) : detectedSilences.length > 0 ? (
                 <button
-                  onClick={onRestoreAllSilences || onRestoreAllCuts}
+                  onClick={() => {
+                    if (onRestoreAllSilences) onRestoreAllSilences();
+                    else onRestoreAllCuts?.();
+                  }}
                   className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold text-xs shadow-lg shadow-emerald-500/10 transition-all cursor-pointer active:scale-95"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
