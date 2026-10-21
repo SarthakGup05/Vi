@@ -46,6 +46,7 @@ flowchart TD
 | **F03** | **"Edit Like a Doc" Interactive Transcript Editor** | SWE + QA | `COMPLETED` | ✅ Pass (7/7 QA Suite) | 2026-10-20 |
 | **F_PROJECTS_DASHBOARD** | **Dedicated Video Projects Dashboard & S3 Storage Optimization** | SWE + QA | `COMPLETED` | ✅ Pass (6/6 QA Suite) | 2026-10-21 |
 | **F_CRUD_AUDIT** | **Full-Stack CRUD Verification & Stream Notice Hardening** | SWE + QA | `COMPLETED` | ✅ Pass (6/6 Full CRUD) | 2026-10-21 |
+| **F_TIMELINE_PRO** | **VN / Adobe Premiere Pro Hybrid Timeline Redesign** | SWE + QA | `COMPLETED` | ✅ Pass (Turbopack Build) | 2026-10-21 |
 | **F04** | **Smart Jump Cut & Silence / Filler Surgery** | SWE + QA | `READY` | ⏳ Up Next | - |
 | **F05** | **Kinetic Captions & Contextual Auto-Emoji Engine** | SWE + QA | `BACKLOG` | ⏳ Pending | - |
 | **F06** | **Automatic Punch Zooms & Visual FX Presets** | SWE + QA | `BACKLOG` | ⏳ Pending | - |
