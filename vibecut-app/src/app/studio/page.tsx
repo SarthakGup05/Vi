@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { StudioHeader } from "@/components/studio/studio-header";
 import { ProjectVaultDrawer } from "@/components/studio/project-vault-drawer";
 import { StudioActivityRail } from "@/components/studio/studio-activity-rail";
@@ -38,8 +39,13 @@ import {
   FileVideo,
 } from "lucide-react";
 
-export default function StudioPage() {
+function StudioContent() {
+  const searchParams = useSearchParams();
+  const projectIdFromUrl = searchParams.get("id");
+
   const [mounted, setMounted] = useState(false);
+  const [isLoadingProject, setIsLoadingProject] = useState(false);
+  const isHydratingRef = useRef(false);
 
   // Project state
   const [projectName, setProjectName] = useState("Untitled Project");
@@ -82,6 +88,102 @@ export default function StudioPage() {
   const [lastSavedText, setLastSavedText] = useState("Not saved");
   const [copilotFeedback, setCopilotFeedback] = useState<string | null>(null);
 
+  const showToast = useCallback((msg: string) => {
+    setCopilotFeedback(msg);
+    setTimeout(() => {
+      setCopilotFeedback((curr) => (curr === msg ? null : curr));
+    }, 3500);
+  }, []);
+
+  // Hydrate an existing project from Supabase vault and S3 storage
+  const hydrateProject = useCallback(async (projId: string) => {
+    try {
+      setIsLoadingProject(true);
+      isHydratingRef.current = true;
+      const res = await fetch(`/api/projects?id=${projId}`);
+      if (!res.ok) throw new Error("Could not fetch project details");
+      const data = await res.json();
+      const proj = data.project;
+      if (!proj) throw new Error("Project record not found in database");
+
+      setProjectName(proj.title || "Untitled Project");
+      setActiveProjectId(proj.id);
+      setAspectRatio((proj.aspect_ratio as AspectRatioMode) || "9:16");
+      setDuration(proj.duration_seconds || 0);
+
+      // Hydrate presigned S3 video stream URL
+      if (proj.videoStreamUrl) {
+        setVideoSrc(proj.videoStreamUrl);
+      }
+
+      // Populate S3 upload state without redundant uploads
+      if (proj.raw_video_s3_key) {
+        setS3State({
+          status: "completed",
+          progress: 100,
+          fileKey: proj.raw_video_s3_key,
+          bucket: "vibecut-storage-2026",
+          totalBytes: proj.file_size_bytes || 0,
+          bytesUploaded: proj.file_size_bytes || 0,
+        });
+      }
+
+      if (proj.file_size_bytes || proj.duration_seconds) {
+        setMetadata({
+          fileName: proj.title || "video.mp4",
+          fileSize: proj.file_size_bytes || 0,
+          width: proj.width || (proj.aspect_ratio === "9:16" ? 1080 : 1920),
+          height: proj.height || (proj.aspect_ratio === "9:16" ? 1920 : 1080),
+          duration: proj.duration_seconds || 0,
+          aspectRatio: (proj.aspect_ratio as AspectRatioMode) || "9:16",
+          format: "video/mp4",
+        });
+      }
+
+      // Restore EDL revisions & styles
+      const latestEdl = proj.edl_revisions?.[0]?.edl_payload;
+      if (latestEdl) {
+        if (latestEdl.cuts && Array.isArray(latestEdl.cuts)) {
+          setTimelineCuts(latestEdl.cuts);
+        }
+        if (latestEdl.captionStyle) {
+          setCaptionStyle(latestEdl.captionStyle);
+        }
+      } else {
+        setTimelineCuts([]);
+      }
+
+      // Restore synchronized transcript words with filler detection
+      const savedWords = proj.transcripts?.[0]?.words;
+      if (savedWords && Array.isArray(savedWords) && savedWords.length > 0) {
+        const detected = detectFillerWords(savedWords);
+        setWords(detected);
+        setTranscriptionState({
+          status: "completed",
+          progress: 100,
+          isMock: false,
+          duration: proj.duration_seconds || 0,
+        });
+      } else {
+        setWords([]);
+        setTranscriptionState({ status: "idle", progress: 0 });
+      }
+
+      setAutoSaveStatus("saved");
+      setLastSavedText("Synchronized");
+      showToast(`Restored "${proj.title}" from S3 cloud vault`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Project load failed";
+      console.warn("Hydration warning:", msg);
+      showToast(`Note: ${msg}`);
+    } finally {
+      setIsLoadingProject(false);
+      setTimeout(() => {
+        isHydratingRef.current = false;
+      }, 600);
+    }
+  }, [showToast]);
+
   // Load user's real projects from Supabase Vault
   const loadVaultProjects = useCallback(async () => {
     try {
@@ -99,6 +201,8 @@ export default function StudioPage() {
             status?: "Draft" | "Exported" | "Ready";
             transcripts?: { transcript_text?: string }[];
             raw_video_s3_key?: string;
+            videoStreamUrl?: string;
+            file_size_bytes?: number;
           }) => ({
             id: p.id,
             title: p.title || "Untitled Project",
@@ -110,6 +214,8 @@ export default function StudioPage() {
             thumbnailGradient: "from-violet-900/60 via-purple-900/40 to-black",
             wordCount: p.transcripts?.[0]?.transcript_text?.split(/\s+/).length || 0,
             s3Key: p.raw_video_s3_key,
+            videoStreamUrl: p.videoStreamUrl,
+            fileSizeBytes: p.file_size_bytes,
           }));
           setVaultProjects(mapped);
         }
@@ -124,10 +230,17 @@ export default function StudioPage() {
     loadVaultProjects();
   }, [loadVaultProjects]);
 
+  // If page is loaded with ?id=<projectId>, hydrate project immediately
+  useEffect(() => {
+    if (projectIdFromUrl) {
+      hydrateProject(projectIdFromUrl);
+    }
+  }, [projectIdFromUrl, hydrateProject]);
+
   // Clean up object URLs on unmount or video change
   useEffect(() => {
     return () => {
-      if (videoSrc) {
+      if (videoSrc && videoSrc.startsWith("blob:")) {
         URL.revokeObjectURL(videoSrc);
       }
     };
@@ -436,47 +549,9 @@ export default function StudioPage() {
     return count;
   }, [words]);
 
-  // Project Vault Selection - loads real project details and transcript
+  // Project Vault Selection - loads real project details, media stream and transcript
   const handleSelectVaultProject = async (item: ProjectVaultItem) => {
-    try {
-      const res = await fetch(`/api/projects?id=${item.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        const proj = data.project;
-        if (proj) {
-          setProjectName(proj.title || item.title);
-          setActiveProjectId(proj.id);
-          setAspectRatio((proj.aspect_ratio as AspectRatioMode) || item.aspectRatio || "9:16");
-          setDuration(proj.duration_seconds || item.duration || 0);
-
-          const latestEdl = proj.edl_revisions?.[0]?.edl_payload;
-          if (latestEdl) {
-            if (latestEdl.cuts) setTimelineCuts(latestEdl.cuts);
-            if (latestEdl.captionStyle) setCaptionStyle(latestEdl.captionStyle);
-          } else {
-            setTimelineCuts([]);
-          }
-
-          const savedWords = proj.transcripts?.[0]?.words;
-          if (savedWords && Array.isArray(savedWords)) {
-            setWords(savedWords);
-          } else {
-            setWords([]);
-          }
-          showToast(`Loaded "${proj.title}" from vault`);
-          return;
-        }
-      }
-    } catch (e) {
-      console.warn("Could not load project details:", e);
-    }
-
-    setProjectName(item.title);
-    setActiveProjectId(item.id);
-    setAspectRatio(item.aspectRatio);
-    setDuration(item.duration);
-    setWords([]);
-    showToast(`Loaded "${item.title}" into canvas`);
+    await hydrateProject(item.id);
   };
 
   // Save Draft with serialized EDL payload to Supabase edl_revisions table
@@ -539,17 +614,20 @@ export default function StudioPage() {
   // Debounced auto-save trigger on transcript cut or timeline modifications
   const isInitialMount = useRef(true);
   useEffect(() => {
-    if (isInitialMount.current) {
+    if (isInitialMount.current || isHydratingRef.current) {
       isInitialMount.current = false;
       return;
     }
+    // Only auto-save if project or video is active
+    if (!activeProjectId && !videoSrc) return;
+
     setAutoSaveStatus("unsaved");
     const debounceTimer = setTimeout(() => {
       handleSaveDraft();
     }, 4000);
 
     return () => clearTimeout(debounceTimer);
-  }, [words, timelineCuts, captionStyle, aspectRatio]);
+  }, [words, timelineCuts, captionStyle, aspectRatio, activeProjectId, videoSrc]);
 
   // AI Copilot Execution
   const handleExecuteCopilotPrompt = (prompt: string) => {
@@ -569,13 +647,6 @@ export default function StudioPage() {
     } else {
       setCopilotFeedback(`Copilot executed: "${prompt}"`);
     }
-  };
-
-  const showToast = (msg: string) => {
-    setCopilotFeedback(msg);
-    setTimeout(() => {
-      setCopilotFeedback((curr) => (curr === msg ? null : curr));
-    }, 3500);
   };
 
   // Sync Activity Rail selection with Inspector tab
@@ -656,7 +727,17 @@ export default function StudioPage() {
         <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#09090b]">
           {/* Top/Middle Stage: Video Player or Ingestion Dropzone */}
           <div className="flex-1 relative flex items-center justify-center p-3 overflow-hidden bg-radial from-[#121217]/50 to-[#09090b]">
-            {!videoSrc ? (
+            {isLoadingProject ? (
+              <div className="flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-200">
+                <div className="w-16 h-16 rounded-2xl bg-violet-600/10 border border-violet-500/30 flex items-center justify-center mb-4 shadow-xl shadow-violet-500/10">
+                  <Loader2 className="h-8 w-8 text-violet-400 animate-spin" />
+                </div>
+                <h3 className="text-base font-bold text-white mb-1">Restoring Project from Vault</h3>
+                <p className="text-xs text-zinc-400 font-mono">
+                  Streaming S3 video stream & synchronizing transcript...
+                </p>
+              </div>
+            ) : !videoSrc ? (
               /* State A: Blank Stage with Drag-and-Drop Real Video Ingestion */
               <div
                 onDragOver={(e) => {
@@ -762,5 +843,24 @@ export default function StudioPage() {
         />
       </div>
     </div>
+  );
+}
+
+function StudioLoadingScreen() {
+  return (
+    <div className="h-screen w-screen bg-[#09090b] text-white flex items-center justify-center">
+      <div className="flex items-center gap-3">
+        <Loader2 className="h-6 w-6 animate-spin text-violet-500" />
+        <span className="font-semibold text-zinc-400">Loading VibeCut Studio Pro...</span>
+      </div>
+    </div>
+  );
+}
+
+export default function StudioPage() {
+  return (
+    <Suspense fallback={<StudioLoadingScreen />}>
+      <StudioContent />
+    </Suspense>
   );
 }

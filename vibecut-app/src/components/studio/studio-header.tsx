@@ -87,9 +87,9 @@ export function StudioHeader({
         {/* Left Section: Back, Logo, Pro Badge, Inline Title & Auto-Save Pill */}
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <Link
-            href="/"
+            href="/projects"
             className="flex items-center justify-center w-8 h-8 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors"
-            title="Return to Dashboard"
+            title="Return to Projects Workspace"
           >
             <ArrowLeft className="h-4 w-4" />
           </Link>

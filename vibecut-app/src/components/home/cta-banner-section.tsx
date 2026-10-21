@@ -26,7 +26,7 @@ export function CtaBannerSection({ onOpenCheckout }: CtaBannerSectionProps) {
             Drop your raw phone footage, let AI strip the silence and burn viral captions, and export wide and tall in seconds.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-            <Link href="/studio">
+            <Link href="/projects">
               <MovingBorderButton
                 duration={3000}
                 className="px-8 py-4 bg-violet-600 hover:bg-violet-500 font-bold text-base shadow-xl shadow-violet-600/30 flex items-center justify-center gap-2 active:scale-95 cursor-pointer"

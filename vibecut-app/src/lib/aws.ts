@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export function getS3Client() {
@@ -60,4 +60,24 @@ export async function getPresignedDownloadUrl(fileKey: string, expiresInSeconds 
   });
 
   return await getSignedUrl(s3, command, { expiresIn: expiresInSeconds });
+}
+
+/**
+ * Delete an object from S3 storage to reclaim bucket space when projects are removed.
+ */
+export async function deleteS3Object(fileKey: string): Promise<boolean> {
+  if (!isAwsConfigured() || !fileKey) return false;
+  try {
+    const s3 = getS3Client();
+    const bucketName = process.env.AWS_S3_BUCKET_NAME?.trim() || "vibecut-storage-2026";
+    const command = new DeleteObjectCommand({
+      Bucket: bucketName,
+      Key: fileKey,
+    });
+    await s3.send(command);
+    return true;
+  } catch (err) {
+    console.error("Failed to delete S3 object:", fileKey, err);
+    return false;
+  }
 }

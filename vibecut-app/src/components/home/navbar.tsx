@@ -30,9 +30,9 @@ export function Navbar({ onOpenCheckout }: NavbarProps) {
 
           {/* Desktop Navigation Links */}
           <nav className="hidden md:flex items-center gap-8 text-sm">
-            <Link href="/studio" className="text-zinc-200 hover:text-white font-semibold transition-colors flex items-center gap-1.5">
+            <Link href="/projects" className="text-zinc-200 hover:text-white font-semibold transition-colors flex items-center gap-1.5">
               <Zap className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
-              <span>Studio</span>
+              <span>Projects</span>
             </Link>
             <a href="#dual-format" className="text-zinc-400 hover:text-white font-medium transition-colors">
               Dual Format

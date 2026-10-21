@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { getPresignedDownloadUrl, deleteS3Object, isAwsConfigured } from "@/lib/aws";
 
 const isValidUUID = (id?: string | null): boolean =>
   Boolean(id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
@@ -210,10 +211,28 @@ export async function GET(req: NextRequest) {
         .single();
 
       if (error) throw error;
-      return NextResponse.json({ project });
+
+      let videoStreamUrl: string | null = null;
+      if (project?.raw_video_s3_key && isAwsConfigured()) {
+        try {
+          videoStreamUrl = await getPresignedDownloadUrl(project.raw_video_s3_key, 7200);
+        } catch (e) {
+          console.warn("Could not sign S3 download URL:", e);
+        }
+      }
+
+      return NextResponse.json({
+        project: {
+          ...project,
+          videoStreamUrl,
+        },
+      });
     }
 
-    let query = admin.from("projects").select("*, transcripts(*), edl_revisions(*)").order("created_at", { ascending: false });
+    let query = admin
+      .from("projects")
+      .select("*, transcripts(*), edl_revisions(*)")
+      .order("created_at", { ascending: false });
 
     if (userId) {
       query = query.eq("user_id", userId);
@@ -224,9 +243,119 @@ export async function GET(req: NextRequest) {
     const { data: projects, error } = await query;
     if (error) throw error;
 
-    return NextResponse.json({ projects });
+    // Attach presigned streaming URLs for each project
+    const projectsWithUrls = await Promise.all(
+      (projects || []).map(async (p) => {
+        let videoStreamUrl: string | null = null;
+        if (p.raw_video_s3_key && isAwsConfigured()) {
+          try {
+            videoStreamUrl = await getPresignedDownloadUrl(p.raw_video_s3_key, 7200);
+          } catch {
+            // ignore streaming URL error on batch listing
+          }
+        }
+        return {
+          ...p,
+          videoStreamUrl,
+        };
+      })
+    );
+
+    return NextResponse.json({ projects: projectsWithUrls });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to fetch projects";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE: Delete a project and purge its raw video from AWS S3 to optimize storage
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get("id");
+
+    if (!id) {
+      try {
+        const body = await req.json();
+        id = body?.id;
+      } catch {
+        // no body
+      }
+    }
+
+    if (!id) {
+      return NextResponse.json({ error: "Project ID is required" }, { status: 400 });
+    }
+
+    const admin = createAdminClient();
+    if (!admin) {
+      return NextResponse.json({ error: "Supabase admin client not initialized" }, { status: 500 });
+    }
+
+    // 1. Fetch project to locate S3 key for storage cleanup
+    const { data: project } = await admin
+      .from("projects")
+      .select("id, raw_video_s3_key")
+      .eq("id", id)
+      .single();
+
+    // 2. Reclaim S3 storage by purging raw video asset
+    if (project?.raw_video_s3_key && isAwsConfigured()) {
+      try {
+        await deleteS3Object(project.raw_video_s3_key);
+      } catch (err) {
+        console.warn("Could not delete S3 object:", project.raw_video_s3_key, err);
+      }
+    }
+
+    // 3. Delete from Supabase PostgreSQL (cascades to transcripts & edl_revisions)
+    const { error } = await admin.from("projects").delete().eq("id", id);
+    if (error) throw error;
+
+    return NextResponse.json({ success: true, message: "Project and S3 storage purged successfully" });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to delete project";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+/**
+ * PATCH: Update project metadata (title, aspect ratio)
+ */
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { id, title, aspect_ratio } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: "Project ID is required" }, { status: 400 });
+    }
+
+    const admin = createAdminClient();
+    if (!admin) {
+      return NextResponse.json({ error: "Supabase admin client not initialized" }, { status: 500 });
+    }
+
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (title) updates.title = title;
+    if (aspect_ratio) updates.aspect_ratio = aspect_ratio;
+
+    const { data: updated, error } = await admin
+      .from("projects")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return NextResponse.json({ project: updated });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Failed to update project";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

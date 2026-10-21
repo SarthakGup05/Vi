@@ -59,6 +59,8 @@ export interface ProjectVaultItem {
   thumbnailGradient: string;
   wordCount?: number;
   s3Key?: string;
+  videoStreamUrl?: string;
+  fileSizeBytes?: number;
 }
 
 export interface TimelineCut {

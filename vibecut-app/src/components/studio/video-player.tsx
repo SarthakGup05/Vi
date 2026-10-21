@@ -360,6 +360,7 @@ export function VideoPlayer({
           src={src}
           className="w-full h-full object-contain cursor-pointer"
           playsInline
+          crossOrigin="anonymous"
           onClick={togglePlay}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}

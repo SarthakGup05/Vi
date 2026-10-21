@@ -104,12 +104,12 @@ export function UserNav({ onOpenCheckout }: UserNavProps) {
 
             {/* Menu Links */}
             <Link
-              href="/studio"
+              href="/projects"
               onClick={() => setDropdownOpen(false)}
               className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-zinc-300 hover:text-white hover:bg-zinc-900 rounded-xl transition-colors"
             >
               <Video className="h-4 w-4 text-violet-400" />
-              <span>My Studio Projects</span>
+              <span>My Video Projects</span>
             </Link>
 
             <button
@@ -162,13 +162,13 @@ export function UserNav({ onOpenCheckout }: UserNavProps) {
         Sign In
       </button>
 
-      {/* Open Studio CTA */}
+      {/* Open Studio / Projects CTA */}
       <Link
-        href="/studio"
+        href="/projects"
         className="px-3.5 py-1.5 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-violet-600/25 transition-all active:scale-95"
       >
         <Zap className="h-3 w-3 text-amber-300 fill-amber-300" />
-        <span>Open Studio</span>
+        <span>Open Projects</span>
         <ArrowRight className="h-3 w-3 hidden sm:inline" />
       </Link>
     </div>

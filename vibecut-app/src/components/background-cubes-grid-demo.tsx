@@ -202,7 +202,7 @@ export function HeroContent({
         className="pointer-events-auto mt-8 flex flex-col items-center gap-3.5 sm:flex-row"
       >
         <Link
-          href="/studio"
+          href="/projects"
           className={cn(
             "inline-flex h-12 items-center justify-center gap-2 rounded-full px-7 text-[15px] font-bold transition-all cursor-pointer shadow-xl active:scale-95",
             t.primary
