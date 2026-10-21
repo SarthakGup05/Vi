@@ -21,8 +21,10 @@ import {
   Sparkles,
   Film,
   SlidersHorizontal,
+  Camera,
+  Layers,
 } from "lucide-react";
-import { StudioWord, TimelineCut } from "@/types/studio";
+import { StudioWord, TimelineCut, PunchZoomInterval, VFXFilterId } from "@/types/studio";
 import { formatTimecode } from "@/lib/studio-utils";
 
 interface TimelineDeckProps {
@@ -35,6 +37,8 @@ interface TimelineDeckProps {
   onCutSilences?: () => void;
   onResetCuts?: () => void;
   silenceCount?: number;
+  punchZoomIntervals?: PunchZoomInterval[];
+  activeVFXFilter?: VFXFilterId;
 }
 
 export function TimelineDeck({
@@ -47,6 +51,8 @@ export function TimelineDeck({
   onCutSilences,
   onResetCuts,
   silenceCount = 14,
+  punchZoomIntervals = [],
+  activeVFXFilter = "none",
 }: TimelineDeckProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -83,8 +89,12 @@ export function TimelineDeck({
       points.add(c.start);
       if (c.end > c.start) points.add(c.end);
     });
+    punchZoomIntervals.forEach((pz) => {
+      points.add(pz.start);
+      points.add(pz.end);
+    });
     return Array.from(points).sort((a, b) => a - b);
-  }, [words, cuts, validDuration]);
+  }, [words, cuts, punchZoomIntervals, validDuration]);
 
   // Handle seeking via click or drag with magnetic snapping
   const handleSeekFromEvent = useCallback(
@@ -416,6 +426,27 @@ export function TimelineDeck({
           >
             <RotateCcw className="h-3.5 w-3.5" />
           </button>
+
+          {/* Active Punch Zooms & VFX Status Badges */}
+          {punchZoomIntervals.length > 0 && (
+            <div
+              className="hidden lg:flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[11px] font-mono font-bold text-amber-300"
+              title={`${punchZoomIntervals.length} Camera punch zoom cuts configured`}
+            >
+              <Zap className="h-3 w-3 fill-amber-400 text-amber-400" />
+              <span>{punchZoomIntervals.length} Zooms</span>
+            </div>
+          )}
+
+          {activeVFXFilter && activeVFXFilter !== "none" && (
+            <div
+              className="hidden lg:flex items-center gap-1.5 px-2 py-1 rounded-lg bg-violet-500/15 border border-violet-500/30 text-[11px] font-mono font-bold text-violet-300"
+              title={`Active Visual FX Filter: ${activeVFXFilter}`}
+            >
+              <Sparkles className="h-3 w-3 text-violet-400" />
+              <span className="uppercase text-[10px]">{activeVFXFilter.replace("_", " ")}</span>
+            </div>
+          )}
         </div>
 
         {/* Center: Precision Digital Timecode HUD */}
@@ -628,6 +659,35 @@ export function TimelineDeck({
               </div>
             ))}
 
+            {/* Punch Zoom Ruler Markers */}
+            {punchZoomIntervals.map((zoom) => {
+              const leftPercent = (zoom.start / validDuration) * 100;
+              const isCurrent = currentTime >= zoom.start && currentTime <= zoom.end;
+              return (
+                <div
+                  key={`pin-zoom-${zoom.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSeek(zoom.start);
+                  }}
+                  className="absolute top-0 z-35 -translate-x-1/2 flex flex-col items-center cursor-pointer group"
+                  style={{ left: `${leftPercent}%` }}
+                  title={`Punch Zoom ${zoom.scale}x (${formatTimecode(zoom.start)} - ${formatTimecode(zoom.end)})`}
+                >
+                  <div
+                    className={`w-2.5 h-2.5 rounded-full border flex items-center justify-center transition-all ${
+                      isCurrent
+                        ? "bg-amber-300 border-white scale-125 shadow-[0_0_8px_#FACC15]"
+                        : "bg-amber-500 border-amber-900 group-hover:scale-110"
+                    }`}
+                  >
+                    <span className="w-1 h-1 rounded-full bg-zinc-950" />
+                  </div>
+                  <div className={`w-[1px] h-3.5 ${isCurrent ? "bg-amber-400" : "bg-amber-500/50"}`} />
+                </div>
+              );
+            })}
+
             {/* Hover Ghost Needle & Tooltip */}
             {hoverTime !== null && (
               <div
@@ -815,6 +875,35 @@ export function TimelineDeck({
                   >
                     ⋈
                   </button>
+                </div>
+              );
+            })}
+
+            {/* Punch Zoom Highlight Overlays on Video Track */}
+            {punchZoomIntervals.map((zoom) => {
+              const leftPercent = (zoom.start / validDuration) * 100;
+              const widthPercent = Math.max(1.8, ((zoom.end - zoom.start) / validDuration) * 100);
+              const isZoomActive = currentTime >= zoom.start && currentTime <= zoom.end;
+
+              return (
+                <div
+                  key={`track-zoom-${zoom.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSeek(zoom.start);
+                  }}
+                  className={`absolute top-0.5 bottom-0.5 z-25 rounded-md flex items-center justify-center px-1 border transition-all cursor-pointer ${
+                    isZoomActive
+                      ? "bg-amber-400/35 border-amber-300 ring-2 ring-amber-400/80 shadow-lg shadow-amber-400/30"
+                      : "bg-amber-500/20 border-amber-400/40 hover:bg-amber-500/30"
+                  }`}
+                  style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
+                  title={`Punch Zoom ${zoom.scale}x [${formatTimecode(zoom.start)} - ${formatTimecode(zoom.end)}]`}
+                >
+                  <span className="text-[8px] font-black font-mono text-amber-200 flex items-center gap-0.5 truncate drop-shadow">
+                    <Zap className="h-2.5 w-2.5 fill-amber-300 text-amber-300 shrink-0" />
+                    {widthPercent > 3 && <span>{zoom.scale}x ZOOM</span>}
+                  </span>
                 </div>
               );
             })}

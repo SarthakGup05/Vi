@@ -32,6 +32,10 @@ import {
   WordsPerLine,
   CaptionSettings,
   TimelineCut,
+  PunchZoomInterval,
+  PunchZoomCadence,
+  VFXSettings,
+  SFXSettings,
 } from "@/types/studio";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -41,6 +45,8 @@ import {
   getCaptionFontSizeClasses,
   DEFAULT_CAPTION_SETTINGS,
 } from "@/lib/caption-engine";
+import { getVFXFilterStyle, getVFXOverlayFlags } from "@/lib/vfx-engine";
+import { playSFX } from "@/lib/sfx-engine";
 
 interface VideoPlayerProps {
   src: string;
@@ -59,6 +65,11 @@ interface VideoPlayerProps {
   showCaptions?: boolean;
   onToggleCaptions?: () => void;
   onAttachLocalFile?: (file: File) => void;
+  vfxSettings?: VFXSettings;
+  sfxSettings?: SFXSettings;
+  punchZooms?: PunchZoomInterval[];
+  zoomCadence?: PunchZoomCadence;
+  zoomIntervals?: PunchZoomInterval[];
 }
 
 export function VideoPlayer({
@@ -78,6 +89,10 @@ export function VideoPlayer({
   showCaptions = true,
   onToggleCaptions,
   onAttachLocalFile,
+  vfxSettings,
+  sfxSettings,
+  punchZooms,
+  zoomIntervals,
 }: VideoPlayerProps) {
   const localRef = useRef<HTMLVideoElement | null>(null);
   const videoRef = externalRef || localRef;
@@ -96,6 +111,53 @@ export function VideoPlayer({
   const [showSafeArea, setShowSafeArea] = useState(false);
   const [captionsVisible, setCaptionsVisible] = useState(showCaptions);
   const [videoError, setVideoError] = useState<string | null>(null);
+
+  const effectivePunchZooms = punchZooms || zoomIntervals || [];
+
+  // Active Punch Zooms & Camera Zoom Matrix
+  const activeZoom = useMemo(() => {
+    if (!effectivePunchZooms || effectivePunchZooms.length === 0) return null;
+    return effectivePunchZooms.find((z) => currentTime >= z.start && currentTime < z.end) || null;
+  }, [effectivePunchZooms, currentTime]);
+
+  const zoomScale = activeZoom ? (activeZoom.scale || 1.15) : 1.0;
+  const zoomOrigin =
+    activeZoom?.originX !== undefined && activeZoom?.originY !== undefined
+      ? `${activeZoom.originX}% ${activeZoom.originY}%`
+      : "50% 50%";
+
+  // Visual FX & CSS Filter Styles
+  const vfxOverlayFlags = useMemo(() => {
+    return getVFXOverlayFlags(vfxSettings);
+  }, [vfxSettings]);
+
+  const vfxFilterStyle = useMemo(() => {
+    return getVFXFilterStyle(vfxSettings);
+  }, [vfxSettings]);
+
+  // SFX Trigger references
+  const lastTriggeredZoomIdRef = useRef<string | null>(null);
+  const lastEmojiWordKeyRef = useRef<string | null>(null);
+
+  // Trigger SFX sound cues on Punch Zoom entrance (whoosh or 808 boom on emphasis)
+  useEffect(() => {
+    if (!isPlaying || !sfxSettings?.enabled) return;
+    if (activeZoom) {
+      if (activeZoom.id !== lastTriggeredZoomIdRef.current) {
+        lastTriggeredZoomIdRef.current = activeZoom.id;
+        if (activeZoom.reason === "emphasis" || activeZoom.isEmphasis) {
+          if (sfxSettings.emphasisImpact) {
+            playSFX("boom", sfxSettings.masterVolume, isMuted);
+          }
+        } else if (sfxSettings.zoomWhoosh) {
+          playSFX("whoosh", (sfxSettings.masterVolume || 0.6) * 0.8, isMuted);
+        }
+      }
+    } else {
+      lastTriggeredZoomIdRef.current = null;
+    }
+  }, [activeZoom, isPlaying, sfxSettings, isMuted]);
+
 
   // Clear errors and reload when src changes
   useEffect(() => {
@@ -186,12 +248,17 @@ export function VideoPlayer({
           videoRef.current.currentTime = nextTime;
           setCurrentTime(nextTime);
           onTimeUpdate?.(nextTime);
+
+          if (sfxSettings?.enabled && sfxSettings.cutWhoosh && isPlaying) {
+            playSFX("whoosh", (sfxSettings.masterVolume || 0.6) * 0.75, isMuted);
+          }
+
           return nextTime;
         }
       }
       return time;
     },
-    [mergedCutIntervals, duration, onTimeUpdate, videoRef]
+    [mergedCutIntervals, duration, onTimeUpdate, videoRef, sfxSettings, isPlaying, isMuted]
   );
 
   // Sub-frame animation loop for ultra-smooth instantaneous cut skipping during playback
@@ -382,6 +449,23 @@ export function VideoPlayer({
     return chunkTranscriptWords(words, currentTime, chunkSize);
   }, [words, currentTime, effectiveCaptionSettings.wordsPerLine]);
 
+  // Trigger SFX sound cues on contextual emoji appearance
+  useEffect(() => {
+    if (!isPlaying || !sfxSettings?.enabled || !sfxSettings.emojiPop) return;
+    if (currentCaptionGroup?.activeWord) {
+      const emoji = effectiveCaptionSettings.autoEmoji
+        ? getEmojiForWord(currentCaptionGroup.activeWord.word)
+        : null;
+      if (emoji) {
+        const key = `${currentCaptionGroup.activeWord.id}-${emoji}`;
+        if (lastEmojiWordKeyRef.current !== key) {
+          lastEmojiWordKeyRef.current = key;
+          playSFX("pop", (sfxSettings.masterVolume || 0.6) * 0.7, isMuted);
+        }
+      }
+    }
+  }, [currentCaptionGroup, isPlaying, sfxSettings, isMuted, effectiveCaptionSettings.autoEmoji]);
+
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
@@ -421,34 +505,117 @@ export function VideoPlayer({
           }}
         />
 
-        {/* Video Element */}
-        <video
-          ref={videoRef}
-          src={src}
-          className="w-full h-full object-contain cursor-pointer"
-          playsInline
-          preload="auto"
-          onClick={togglePlay}
-          onTimeUpdate={handleTimeUpdate}
-          onLoadedMetadata={() => {
-            setVideoError(null);
-            handleLoadedMetadata();
+        {/* Real-time Camera Punch Zoom Transform Container */}
+        <div
+          className="relative w-full h-full flex items-center justify-center overflow-hidden"
+          style={{
+            transform: `scale(${zoomScale})`,
+            transformOrigin: zoomOrigin,
+            transition: "transform 0.18s cubic-bezier(0.2, 0, 0, 1)",
           }}
-          onCanPlay={() => {
-            setVideoError(null);
-          }}
-          onError={() => {
-            // If duration already loaded or video has frames, ignore transient network skips
-            if (duration > 0 || (videoRef.current && videoRef.current.readyState >= 1)) {
-              return;
-            }
-            const err = videoRef.current?.error;
-            console.warn("Video stream load notice:", err?.code, err?.message);
-            setVideoError("Cloud video stream buffering or reconnecting.");
-          }}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-        />
+        >
+          {/* Video Element */}
+          <video
+            ref={videoRef}
+            src={src}
+            className="w-full h-full object-contain cursor-pointer"
+            style={vfxFilterStyle}
+            playsInline
+            preload="auto"
+            onClick={togglePlay}
+            onTimeUpdate={handleTimeUpdate}
+            onLoadedMetadata={() => {
+              setVideoError(null);
+              handleLoadedMetadata();
+            }}
+            onCanPlay={() => {
+              setVideoError(null);
+            }}
+            onError={() => {
+              // If duration already loaded or video has frames, ignore transient network skips
+              if (duration > 0 || (videoRef.current && videoRef.current.readyState >= 1)) {
+                return;
+              }
+              const err = videoRef.current?.error;
+              console.warn("Video stream load notice:", err?.code, err?.message);
+              setVideoError("Cloud video stream buffering or reconnecting.");
+            }}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+          />
+        </div>
+
+        {/* ACTIVE VFX OVERLAY LAYERS: film_grain, rgb_split, vhs_retro, cyber_scan, letterbox_cinematic */}
+        {/* 1. 35mm Film Grain SVG (film_grain) */}
+        {vfxOverlayFlags.showGrain && (
+          <div
+            data-vfx="film_grain"
+            className="absolute inset-0 pointer-events-none z-20 opacity-25 mix-blend-overlay"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.7'/%3E%3C/svg%3E")`,
+            }}
+          />
+        )}
+
+        {/* 2. Cyber CRT Scanlines (cyber_scan) */}
+        {vfxOverlayFlags.showScanlines && (
+          <div
+            data-vfx="cyber_scan"
+            className="absolute inset-0 pointer-events-none z-20 opacity-30 mix-blend-overlay"
+            style={{
+              backgroundImage:
+                "repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.45) 1px, transparent 1px, transparent 3px)",
+            }}
+          />
+        )}
+
+        {/* 3. RGB Split Chromatic Aberration fringe on punch zoom (rgb_split) */}
+        {vfxOverlayFlags.showRgbSplit && activeZoom && (
+          <div
+            data-vfx="rgb_split"
+            className="absolute inset-0 pointer-events-none z-20 mix-blend-screen opacity-40 transition-opacity duration-150"
+            style={{
+              boxShadow:
+                "inset 5px 0 12px rgba(239, 68, 68, 0.4), inset -5px 0 12px rgba(56, 189, 248, 0.4)",
+            }}
+          />
+        )}
+
+        {/* 4. 2.39:1 Anamorphic Letterbox Cinematic Bars (letterbox_cinematic) */}
+        {vfxOverlayFlags.showLetterbox && (
+          <div data-vfx="letterbox_cinematic" className="absolute inset-0 pointer-events-none z-20 flex flex-col justify-between">
+            <div className="w-full bg-black shadow-md" style={{ height: "12%" }} />
+            <div className="w-full bg-black shadow-md" style={{ height: "12%" }} />
+          </div>
+        )}
+
+        {/* 5. Vintage 90s VHS Camcorder OSD HUD (vhs_retro) */}
+        {vfxOverlayFlags.showVhsHud && (
+          <div data-vfx="vhs_retro" className="absolute inset-0 pointer-events-none z-25 p-4 flex flex-col justify-between text-[#22c55e] font-mono select-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
+            <div className="w-full flex items-center justify-between text-xs tracking-widest font-black">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
+                <span className="text-red-500 font-extrabold tracking-wider">REC</span>
+              </div>
+              <div className="text-zinc-200 text-[11px] font-mono bg-black/40 px-2 py-0.5 rounded border border-white/10">
+                PLAY ▶ <span className="text-emerald-400">SP</span>
+              </div>
+            </div>
+
+            <div className="w-full h-0.5 bg-white/20 opacity-40 blur-[0.5px] animate-pulse" />
+
+            <div className="w-full flex items-end justify-between text-[11px] tracking-wider text-zinc-300 font-mono">
+              <div className="flex flex-col">
+                <span className="text-amber-300 text-[10px]">TAPE 01</span>
+                <span className="font-bold text-white text-xs">{formatTimecode(currentTime)}</span>
+              </div>
+              <div className="text-right flex flex-col items-end">
+                <span className="text-[9px] text-zinc-400">AUTO-TRACK</span>
+                <span className="text-emerald-400 text-[10px] font-bold">STEREO Hi-Fi</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Video Error Fallback Card with Interactive Recovery */}
         {videoError && (

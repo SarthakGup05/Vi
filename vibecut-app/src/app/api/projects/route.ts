@@ -24,14 +24,30 @@ export async function POST(req: NextRequest) {
       edl,
       captionSettings,
       applied_prompt,
+      template,
+      vfxSettings,
+      punchZoomCadence,
     } = body;
 
     let finalEdl = edl || null;
-    if (captionSettings) {
+    if (captionSettings || template || vfxSettings || punchZoomCadence) {
       if (!finalEdl) {
-        finalEdl = { captionSettings, captionStyle: captionSettings.style || captionSettings.preset };
-      } else if (!finalEdl.captionSettings) {
-        finalEdl = { ...finalEdl, captionSettings };
+        finalEdl = {};
+      }
+      if (captionSettings) {
+        finalEdl.captionSettings = captionSettings;
+        if (!finalEdl.captionStyle) {
+          finalEdl.captionStyle = captionSettings.style || captionSettings.preset;
+        }
+      }
+      if (template && !finalEdl.template) {
+        finalEdl.template = template;
+      }
+      if (vfxSettings && !finalEdl.vfxSettings) {
+        finalEdl.vfxSettings = vfxSettings;
+      }
+      if (punchZoomCadence && !finalEdl.punchZoomCadence) {
+        finalEdl.punchZoomCadence = punchZoomCadence;
       }
     }
 
@@ -63,7 +79,9 @@ export async function POST(req: NextRequest) {
         session_id,
         user_id,
         status: "ready",
-        edlRevision: edl ? { id: `mock_rev_${Date.now()}`, edl_payload: edl } : null,
+        template: finalEdl?.template || template || null,
+        vfxSettings: finalEdl?.vfxSettings || vfxSettings || null,
+        edlRevision: finalEdl ? { id: `mock_rev_${Date.now()}`, edl_payload: finalEdl } : null,
         isMock: true,
       });
     }
@@ -265,6 +283,9 @@ export async function GET(req: NextRequest) {
         edl_revisions: sortedEdl,
         captionSettings: latestEdlPayload?.captionSettings || null,
         captionStyle: latestEdlPayload?.captionStyle || latestEdlPayload?.captionSettings?.style || "hormozi",
+        template: latestEdlPayload?.template || null,
+        vfxSettings: latestEdlPayload?.vfxSettings || null,
+        punchZoomCadence: latestEdlPayload?.punchZoomCadence || null,
         videoStreamUrl,
       };
     };
@@ -387,7 +408,7 @@ export async function DELETE(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, title, aspect_ratio, edl, captionSettings, applied_prompt } = body;
+    const { id, title, aspect_ratio, edl, captionSettings, applied_prompt, template, vfxSettings, punchZoomCadence } = body;
 
     if (!id) {
       return NextResponse.json({ error: "Project ID is required" }, { status: 400 });
@@ -414,11 +435,24 @@ export async function PATCH(req: NextRequest) {
     if (error) throw error;
 
     let finalEdl = edl || null;
-    if (captionSettings) {
+    if (captionSettings || template || vfxSettings || punchZoomCadence) {
       if (!finalEdl) {
-        finalEdl = { captionSettings, captionStyle: captionSettings.style || captionSettings.preset };
-      } else if (!finalEdl.captionSettings) {
-        finalEdl = { ...finalEdl, captionSettings };
+        finalEdl = {};
+      }
+      if (captionSettings) {
+        finalEdl.captionSettings = captionSettings;
+        if (!finalEdl.captionStyle) {
+          finalEdl.captionStyle = captionSettings.style || captionSettings.preset;
+        }
+      }
+      if (template && !finalEdl.template) {
+        finalEdl.template = template;
+      }
+      if (vfxSettings && !finalEdl.vfxSettings) {
+        finalEdl.vfxSettings = vfxSettings;
+      }
+      if (punchZoomCadence && !finalEdl.punchZoomCadence) {
+        finalEdl.punchZoomCadence = punchZoomCadence;
       }
     }
 

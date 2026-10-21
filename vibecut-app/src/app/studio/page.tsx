@@ -22,7 +22,17 @@ import {
   ProjectVaultItem,
   TimelineCut,
   SilenceGap,
+  TrendingTemplateId,
+  VFXSettings,
+  PunchZoomCadence,
+  PunchZoomInterval,
+  SfxCueId,
 } from "@/types/studio";
+import {
+  calculatePunchZoomIntervals,
+  applyTrendingTemplateToEdl as applyPresetTemplate,
+  playProceduralSfx,
+} from "@/lib/vfx-sfx-engine";
 import { DEFAULT_CAPTION_SETTINGS } from "@/lib/caption-engine";
 import {
   extractVideoMetadata,
@@ -102,6 +112,20 @@ function StudioContent() {
 
   const [words, setWords] = useState<StudioWord[]>([]);
   const [timelineCuts, setTimelineCuts] = useState<TimelineCut[]>([]);
+  // Visual FX, Presets & Punch Zoom state
+  const [activeTemplate, setActiveTemplate] = useState<TrendingTemplateId>("beast_viral");
+  const [vfxSettings, setVfxSettings] = useState<VFXSettings>({
+    filter: "none",
+    intensity: 70,
+    letterbox: false,
+    grain: false,
+    rgbSplit: false,
+    scanlines: false,
+    vhsHud: false,
+  });
+  const [zoomCadence, setZoomCadence] = useState<PunchZoomCadence>("fast_3s");
+  const [zoomIntervals, setZoomIntervals] = useState<PunchZoomInterval[]>([]);
+
   const [silenceThreshold, setSilenceThreshold] = useState<number>(0.5);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
   const [lastSavedText, setLastSavedText] = useState("Not saved");
@@ -176,6 +200,15 @@ function StudioContent() {
       if (latestEdl) {
         if (latestEdl.cuts && Array.isArray(latestEdl.cuts)) {
           setTimelineCuts(latestEdl.cuts);
+        }
+        if (latestEdl.template || proj.template) {
+          setActiveTemplate(latestEdl.template || proj.template);
+        }
+        if (latestEdl.vfxSettings || proj.vfxSettings) {
+          setVfxSettings(latestEdl.vfxSettings || proj.vfxSettings);
+        }
+        if (latestEdl.punchZoomCadence || proj.punchZoomCadence) {
+          setZoomCadence(latestEdl.punchZoomCadence || proj.punchZoomCadence);
         }
         if (latestEdl.captionSettings) {
           setCaptionSettings(latestEdl.captionSettings);
@@ -643,6 +676,29 @@ function StudioContent() {
     await hydrateProject(item.id);
   };
 
+  // Recompute dynamic punch zoom cuts when cadence, duration, or transcript updates
+  useEffect(() => {
+    if (duration > 0 && zoomCadence !== "off") {
+      const calculated = calculatePunchZoomIntervals(zoomCadence, duration, words);
+      setZoomIntervals(calculated);
+    } else if (zoomCadence === "off") {
+      setZoomIntervals([]);
+    }
+  }, [zoomCadence, duration, words]);
+
+  // Apply complete Trending Preset Template Bundle (Captions, VFX, Zoom Cadence, SFX)
+  const handleApplyTemplate = useCallback((tplId: TrendingTemplateId) => {
+    const bundle = applyPresetTemplate(tplId, duration, words);
+    setActiveTemplate(tplId);
+    setCaptionSettings(bundle.captionSettings);
+    setCaptionStyle(bundle.captionSettings.style);
+    setVfxSettings(bundle.vfxSettings);
+    setZoomCadence(bundle.zoomCadence);
+    setZoomIntervals(bundle.zoomIntervals);
+    playProceduralSfx((bundle.preset.sfxCue || "whoosh") as SfxCueId);
+    showToast(`Applied ${bundle.preset.name} template preset bundle`);
+  }, [duration, words, showToast]);
+
   // Save Draft with serialized EDL payload to Supabase edl_revisions table
   const handleSaveDraft = async () => {
     setAutoSaveStatus("saving");
@@ -654,6 +710,9 @@ function StudioContent() {
         captionStyle: captionSettings.style,
         captionSettings,
         aspectRatio,
+        template: activeTemplate,
+        vfxSettings,
+        punchZoomCadence: zoomCadence,
       };
 
       const res = await fetch("/api/projects", {
@@ -936,6 +995,9 @@ function StudioContent() {
                 captionSettings={captionSettings}
                 showCaptions={showCaptions}
                 onToggleCaptions={() => setShowCaptions(!showCaptions)}
+                vfxSettings={vfxSettings}
+                zoomCadence={zoomCadence}
+                zoomIntervals={zoomIntervals}
                 onAttachLocalFile={(file) => {
                   const url = URL.createObjectURL(file);
                   setVideoSrc(url);
@@ -963,6 +1025,8 @@ function StudioContent() {
             onCutSilences={handleAutoCutSilences}
             onResetCuts={handleResetCuts}
             silenceCount={silenceCount}
+            punchZoomIntervals={zoomIntervals}
+            activeVFXFilter={vfxSettings.filter}
           />
         </div>
 
@@ -998,6 +1062,20 @@ function StudioContent() {
           onAutoEmojiChange={(e) => handleCaptionSettingsChange({ ...captionSettings, autoEmoji: e })}
           onExecuteCopilotPrompt={handleExecuteCopilotPrompt}
           copilotFeedback={copilotFeedback}
+          activePresetId={activeTemplate}
+          onApplyPreset={(tpl) => handleApplyTemplate(tpl.id)}
+          activeVFXFilter={vfxSettings.filter}
+          onVFXFilterChange={(f) => setVfxSettings((prev) => ({ ...prev, filter: f }))}
+          punchZoomCadence={zoomCadence}
+          onPunchZoomCadenceChange={setZoomCadence}
+          vfxSettings={vfxSettings}
+          onVfxSettingsChange={setVfxSettings}
+          activeTemplate={activeTemplate}
+          onApplyTemplate={handleApplyTemplate}
+          zoomCadence={zoomCadence}
+          onZoomCadenceChange={setZoomCadence}
+          zoomIntervals={zoomIntervals}
+          onPlaySfx={(cue) => playProceduralSfx(cue as SfxCueId)}
         />
       </div>
     </div>

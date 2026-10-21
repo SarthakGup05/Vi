@@ -27,6 +27,14 @@ import {
   Layers,
   Palette,
   MoveVertical,
+  Tv,
+  Film,
+  Cpu,
+  Maximize2,
+  Ban,
+  Eye,
+  Play,
+  Volume1,
 } from "lucide-react";
 import {
   StudioWord,
@@ -39,12 +47,29 @@ import {
   CaptionSettings,
   WordsPerLine,
   CAPTION_HIGHLIGHT_COLORS,
+  TrendingTemplateId,
+  VFXFilterId,
+  PunchZoomCadence,
+  PunchZoomScale,
+  PunchZoomInterval,
+  VFXSettings,
+  SFXSettings,
+  TemplatePreset,
+  SFXSoundId,
+  SfxCueId,
 } from "@/types/studio";
 import { formatTimecode, detectSilenceGaps } from "@/lib/studio-utils";
 import {
   CREATOR_HIGHLIGHT_COLORS,
   DEFAULT_CAPTION_SETTINGS,
 } from "@/lib/caption-engine";
+import {
+  TRENDING_TEMPLATES,
+  VFX_FILTERS_CONFIG,
+  SFX_SOUNDS_CONFIG,
+  playSFXSound,
+} from "@/lib/vfx-presets";
+import { playProceduralSfx } from "@/lib/vfx-sfx-engine";
 
 interface StudioInspectorProps {
   activeTab: StudioTab;
@@ -77,6 +102,32 @@ interface StudioInspectorProps {
   onAutoEmojiChange?: (enabled: boolean) => void;
   onExecuteCopilotPrompt: (prompt: string) => void;
   copilotFeedback?: string | null;
+  // Presets, VFX & SFX Controls
+  activePresetId?: TrendingTemplateId | null;
+  activeTemplate?: TrendingTemplateId | null;
+  onApplyPreset?: (preset: TemplatePreset) => void;
+  onApplyTemplate?: (templateId: TrendingTemplateId) => void;
+  vfxSettings?: VFXSettings;
+  onVfxSettingsChange?: (settings: VFXSettings) => void;
+  activeVFXFilter?: VFXFilterId;
+  onVFXFilterChange?: (filter: VFXFilterId) => void;
+  zoomCadence?: PunchZoomCadence;
+  onZoomCadenceChange?: (cadence: PunchZoomCadence) => void;
+  zoomIntervals?: PunchZoomInterval[];
+  punchZoomCadence?: PunchZoomCadence;
+  onPunchZoomCadenceChange?: (cadence: PunchZoomCadence) => void;
+  punchZoomScale?: PunchZoomScale;
+  onPunchZoomScaleChange?: (scale: PunchZoomScale) => void;
+  punchZoomEmphasis?: boolean;
+  onPunchZoomEmphasisChange?: (emphasis: boolean) => void;
+  sfxSettings?: SFXSettings;
+  onSfxSettingsChange?: (settings: SFXSettings) => void;
+  sfxVolume?: number;
+  onSfxVolumeChange?: (vol: number) => void;
+  isSfxMuted?: boolean;
+  onToggleSfxMute?: () => void;
+  onTriggerTestPunch?: () => void;
+  onPlaySfx?: (sfx: SFXSoundId | string) => void;
 }
 
 export function StudioInspector({
@@ -110,6 +161,31 @@ export function StudioInspector({
   onAutoEmojiChange,
   onExecuteCopilotPrompt,
   copilotFeedback,
+  activePresetId: propActivePresetId,
+  activeTemplate: propActiveTemplate,
+  onApplyPreset,
+  onApplyTemplate,
+  vfxSettings: propVfxSettings,
+  onVfxSettingsChange,
+  activeVFXFilter: propActiveVFXFilter,
+  onVFXFilterChange,
+  zoomCadence: propZoomCadence,
+  onZoomCadenceChange,
+  zoomIntervals = [],
+  punchZoomCadence: propPunchZoomCadence,
+  onPunchZoomCadenceChange,
+  punchZoomScale: propPunchZoomScale,
+  onPunchZoomScaleChange,
+  punchZoomEmphasis: propPunchZoomEmphasis,
+  onPunchZoomEmphasisChange,
+  sfxSettings: propSfxSettings,
+  onSfxSettingsChange,
+  sfxVolume: propSfxVolume,
+  onSfxVolumeChange,
+  isSfxMuted: propIsSfxMuted,
+  onToggleSfxMute,
+  onTriggerTestPunch,
+  onPlaySfx,
 }: StudioInspectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [copilotInput, setCopilotInput] = useState("");
@@ -202,6 +278,126 @@ export function StudioInspector({
   const [voiceEnhance, setVoiceEnhance] = useState(true);
   const [autoDucking, setAutoDucking] = useState(true);
   const [duckingLevel, setDuckingLevel] = useState(75);
+
+  // Presets & VFX Local & Unified State
+  const [localPresetId, setLocalPresetId] = useState<TrendingTemplateId | null>("beast_viral");
+  const [localVfxFilter, setLocalVfxFilter] = useState<VFXFilterId>("none");
+  const [localPunchCadence, setLocalPunchCadence] = useState<PunchZoomCadence>("fast_3s");
+  const [localPunchScale, setLocalPunchScale] = useState<PunchZoomScale>(1.15);
+  const [localEmphasis, setLocalEmphasis] = useState(true);
+  const [localSfxVol, setLocalSfxVol] = useState(0.8);
+  const [localSfxMuted, setLocalSfxMuted] = useState(false);
+  const [activePlayingSfx, setActivePlayingSfx] = useState<string | null>(null);
+
+  const activeTemplate = propActiveTemplate || propActivePresetId || localPresetId || "beast_viral";
+
+  const vfxSettings: VFXSettings = propVfxSettings || {
+    filter: propActiveVFXFilter || localVfxFilter || "none",
+    intensity: 75,
+    letterbox: (propActiveVFXFilter || localVfxFilter) === "letterbox_cinematic",
+    grain: (propActiveVFXFilter || localVfxFilter) === "film_grain",
+    rgbSplit: (propActiveVFXFilter || localVfxFilter) === "rgb_split",
+    scanlines: (propActiveVFXFilter || localVfxFilter) === "cyber_scan",
+    vhsHud: (propActiveVFXFilter || localVfxFilter) === "vhs_retro",
+    colorGrade: "none",
+  };
+
+  const zoomCadence = propZoomCadence || propPunchZoomCadence || localPunchCadence || "fast_3s";
+  const currentPunchScale = propPunchZoomScale !== undefined ? propPunchZoomScale : localPunchScale;
+  const currentEmphasis = propPunchZoomEmphasis !== undefined ? propPunchZoomEmphasis : localEmphasis;
+  const currentSfxVol = propSfxVolume !== undefined ? propSfxVolume : localSfxVol;
+  const currentSfxMuted = propIsSfxMuted !== undefined ? propIsSfxMuted : localSfxMuted;
+  const activeZoomIntervals =
+    zoomIntervals && zoomIntervals.length > 0 ? zoomIntervals : [];
+
+  const playSfx = useCallback(
+    (cue: SFXSoundId | SfxCueId | string) => {
+      setActivePlayingSfx(cue);
+      setTimeout(() => setActivePlayingSfx(null), 380);
+      if (!currentSfxMuted) {
+        if (onPlaySfx) {
+          onPlaySfx(cue as SfxCueId);
+        } else {
+          try {
+            playProceduralSfx(cue as SfxCueId, currentSfxVol);
+          } catch {
+            playSFXSound(cue as SFXSoundId, currentSfxVol, currentSfxMuted);
+          }
+        }
+      }
+    },
+    [currentSfxMuted, currentSfxVol, onPlaySfx]
+  );
+
+  const handleApplyPresetAll = useCallback(
+    (template: TemplatePreset) => {
+      setLocalPresetId(template.id);
+      if (onApplyPreset) {
+        onApplyPreset(template);
+      }
+      if (onApplyTemplate) {
+        onApplyTemplate(template.id);
+      }
+
+      // 1. Update VFX Filter
+      const targetFilter = template.vfxFilter || template.vfx?.filter || "none";
+      setLocalVfxFilter(targetFilter);
+      onVFXFilterChange?.(targetFilter);
+      onVfxSettingsChange?.({
+        filter: targetFilter,
+        intensity: template.vfx?.intensity || 75,
+        letterbox: targetFilter === "letterbox_cinematic",
+        grain: targetFilter === "film_grain",
+        rgbSplit: targetFilter === "rgb_split",
+        scanlines: targetFilter === "cyber_scan" || targetFilter === "vhs_retro",
+        vhsHud: targetFilter === "vhs_retro",
+        colorGrade: template.vfx?.colorGrade || "none",
+      });
+
+      // 2. Update Punch Zoom Cadence & Scale
+      const targetCadence = (template.zoomCadence || template.punchZoomCadence || "fast_3s") as PunchZoomCadence;
+      const targetScale = (template.zoomScale || template.punchZoomScale || 1.15) as PunchZoomScale;
+      setLocalPunchCadence(targetCadence);
+      onZoomCadenceChange?.(targetCadence);
+      onPunchZoomCadenceChange?.(targetCadence);
+      setLocalPunchScale(targetScale);
+      onPunchZoomScaleChange?.(targetScale);
+
+      // 3. Update Captions (Style, Highlight, Words per line, Auto-Emoji)
+      updateCaptionSettings({
+        style: template.captionStyle,
+        highlightColor: template.captionHighlightColor || template.captionHighlight || "#FACC15",
+        wordsPerLine: template.wordsPerLine,
+        autoEmoji: template.autoEmoji,
+        position: template.captionPosition || "bottom",
+      });
+
+      // 4. Play signature SFX cue
+      const cue =
+        template.sfxCue ||
+        (template.id === "cinematic"
+          ? "boom"
+          : template.id === "hyper_fast"
+          ? "pop"
+          : template.id === "cyber_glitch"
+          ? "glitch"
+          : template.id === "vintage_vhs"
+          ? "tape"
+          : "whoosh");
+      playSfx(cue);
+    },
+    [
+      onApplyPreset,
+      onApplyTemplate,
+      onVFXFilterChange,
+      onVfxSettingsChange,
+      onZoomCadenceChange,
+      onPunchZoomCadenceChange,
+      onPunchZoomScaleChange,
+      updateCaptionSettings,
+      playSfx,
+    ]
+  );
 
   // Silence threshold (supports local or controlled)
   const [localSilenceThreshold, setLocalSilenceThreshold] = useState(0.5);
@@ -1200,6 +1396,206 @@ export function StudioInspector({
         )}
 
         {/* TAB 4: AUDIO & SFX */}
+        
+        {/* TAB 5: TRENDING TEMPLATES, VFX PRESETS & PUNCH ZOOM CADENCE */}
+        {activeTab === "presets" && (
+          <div className="flex flex-col gap-4">
+            {/* 1. 5 Trending Preset Templates */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+                  Trending Preset Bundles
+                </h3>
+                <span className="text-[10px] font-mono font-semibold text-violet-300 bg-violet-900/40 border border-violet-500/30 px-2 py-0.5 rounded">
+                  5 Presets
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-400 mb-2.5">
+                1-Click complete bundles: kinetic caption style, visual FX filter, punch zoom cadence & procedural SFX.
+              </p>
+
+              <div className="flex flex-col gap-2">
+                {TRENDING_TEMPLATES.map((tpl) => {
+                  const isActive = activeTemplate === tpl.id;
+                  return (
+                    <button
+                      key={tpl.id}
+                      onClick={() => onApplyTemplate?.(tpl.id)}
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative ${
+                        isActive
+                          ? "bg-gradient-to-r from-violet-600/20 via-indigo-600/15 to-transparent border-violet-400/60 shadow-lg shadow-violet-600/10 ring-1 ring-violet-400/40"
+                          : "bg-[#181820] hover:bg-[#20202a] border-white/5"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-white">{tpl.name}</span>
+                          {tpl.badge && (
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-zinc-300">
+                              {tpl.badge}
+                            </span>
+                          )}
+                        </div>
+                        {isActive && <Check className="h-3.5 w-3.5 text-violet-400 shrink-0" />}
+                      </div>
+
+                      <p className="text-[11px] text-zinc-400 mb-2">{tpl.tagline}</p>
+
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+                        <span className="px-1.5 py-0.5 rounded bg-black/50 text-amber-300 border border-amber-500/20">
+                          {tpl.captionStyle}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-black/50 text-cyan-300 border border-cyan-500/20">
+                          {tpl.vfxFilter}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-black/50 text-emerald-300 border border-emerald-500/20">
+                          {tpl.punchZoomCadence || tpl.zoomCadence}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-black/50 text-fuchsia-300 border border-fuchsia-500/20">
+                          {tpl.sfxCue || "whoosh"}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 2. Visual FX Presets */}
+            <div className="p-3.5 rounded-xl bg-[#181820] border border-white/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Film className="h-3.5 w-3.5 text-cyan-400" />
+                  Visual FX Filter Overlays
+                </span>
+                <span className="text-[10px] font-mono text-zinc-400">
+                  {vfxSettings?.filter || "none"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5 text-xs">
+                {VFX_FILTERS_CONFIG.map((f) => {
+                  const isSel = (vfxSettings?.filter || "none") === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => {
+                        onVfxSettingsChange?.({
+                          filter: f.id,
+                          intensity: vfxSettings?.intensity || 75,
+                          letterbox: f.id === "letterbox_cinematic",
+                          grain: f.id === "film_grain",
+                          rgbSplit: f.id === "rgb_split",
+                          scanlines: f.id === "cyber_scan" || f.id === "vhs_retro",
+                          vhsHud: f.id === "vhs_retro",
+                        });
+                      }}
+                      className={`p-2 rounded-lg border text-center transition-all cursor-pointer ${
+                        isSel
+                          ? "bg-cyan-500/20 border-cyan-400/60 text-cyan-300"
+                          : "bg-black/30 hover:bg-black/50 border-white/5 text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      <div className="text-[11px] font-semibold truncate">{f.name.split("/")[0]}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {vfxSettings && vfxSettings.filter !== "none" && (
+                <div className="pt-2 border-t border-white/5 space-y-1">
+                  <div className="flex justify-between text-[11px] text-zinc-400">
+                    <span>Filter Intensity</span>
+                    <span>{vfxSettings.intensity}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    value={vfxSettings.intensity}
+                    onChange={(e) => {
+                      onVfxSettingsChange?.({
+                        ...vfxSettings,
+                        intensity: parseInt(e.target.value),
+                      });
+                    }}
+                    className="w-full accent-cyan-500 cursor-pointer"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* 3. Automatic Punch Zoom Cadence */}
+            <div className="p-3.5 rounded-xl bg-[#181820] border border-white/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Zap className="h-3.5 w-3.5 text-amber-400" />
+                  Punch Zoom Cadence
+                </span>
+                <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+                  {zoomIntervals.length} Zoom Cuts
+                </span>
+              </div>
+
+              <div className="grid grid-cols-4 gap-1.5 text-xs">
+                {(["off", "fast_3s", "natural_5s", "emphasis"] as PunchZoomCadence[]).map((cad) => {
+                  const isSel = zoomCadence === cad;
+                  const labelMap: Record<string, string> = {
+                    off: "Off",
+                    fast_3s: "3s Fast",
+                    natural_5s: "5s Natural",
+                    emphasis: "Emphasis",
+                  };
+                  return (
+                    <button
+                      key={cad}
+                      onClick={() => onZoomCadenceChange?.(cad)}
+                      className={`p-2 rounded-lg border text-center transition-all cursor-pointer ${
+                        isSel
+                          ? "bg-amber-500/20 border-amber-400/60 text-amber-300 font-bold"
+                          : "bg-black/30 hover:bg-black/50 border-white/5 text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      <div className="text-[10px]">{labelMap[cad]}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 4. Procedural SFX Soundboard */}
+            <div className="p-3.5 rounded-xl bg-[#181820] border border-white/5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Volume2 className="h-3.5 w-3.5 text-rose-400" />
+                  Procedural SFX Soundboard
+                </span>
+                <span className="text-[10px] font-mono text-zinc-400">0ms Synthesis</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {SFX_SOUNDS_CONFIG.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => {
+                      playProceduralSfx(s.id);
+                      onPlaySfx?.(s.id);
+                    }}
+                    className="p-2 rounded-lg bg-black/40 hover:bg-black/70 border border-white/5 text-zinc-300 text-left cursor-pointer transition-colors flex items-center justify-between active:scale-95"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span>{s.emoji}</span>
+                      <span className="font-semibold">{s.name}</span>
+                    </span>
+                    <span className="text-[9px] font-mono text-zinc-500">{s.tagline || s.frequencyDesc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === "audio" && (
           <div className="flex flex-col gap-4">
             {/* Voice Enhancer */}
