@@ -81,20 +81,26 @@ export async function POST(req: NextRequest) {
     // Insert or update project
     let savedProject;
     if (isValidUUID(projectId)) {
+      const updateData: Record<string, unknown> = {
+        title,
+        aspect_ratio,
+        width,
+        height,
+        duration_seconds,
+        session_id: validSessionId,
+        user_id: user_id || null,
+        updated_at: new Date().toISOString(),
+      };
+      if (raw_video_s3_key) {
+        updateData.raw_video_s3_key = raw_video_s3_key;
+      }
+      if (file_size_bytes) {
+        updateData.file_size_bytes = file_size_bytes;
+      }
+
       const { data, error } = await admin
         .from("projects")
-        .update({
-          title,
-          raw_video_s3_key,
-          file_size_bytes,
-          aspect_ratio,
-          width,
-          height,
-          duration_seconds,
-          session_id: validSessionId,
-          user_id: user_id || null,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq("id", projectId)
         .select()
         .maybeSingle();
@@ -125,19 +131,40 @@ export async function POST(req: NextRequest) {
       savedProject = data;
     }
 
-    // If transcript payload is also attached, persist to transcripts table
+    // If transcript payload is also attached, upsert to transcripts table
     if (savedProject?.id && transcript && transcript.words) {
-      const { error: transcriptError } = await admin
+      const { data: existingTranscript } = await admin
         .from("transcripts")
-        .insert({
-          project_id: savedProject.id,
-          language: transcript.language || "en",
-          full_text: transcript.text || "",
-          words_json: transcript.words || [],
-        });
+        .select("id")
+        .eq("project_id", savedProject.id)
+        .maybeSingle();
 
-      if (transcriptError) {
-        console.warn("Could not insert transcript:", transcriptError.message);
+      if (existingTranscript) {
+        const { error: transcriptError } = await admin
+          .from("transcripts")
+          .update({
+            language: transcript.language || "en",
+            full_text: transcript.text || "",
+            words_json: transcript.words || [],
+          })
+          .eq("id", existingTranscript.id);
+
+        if (transcriptError) {
+          console.warn("Could not update transcript:", transcriptError.message);
+        }
+      } else {
+        const { error: transcriptError } = await admin
+          .from("transcripts")
+          .insert({
+            project_id: savedProject.id,
+            language: transcript.language || "en",
+            full_text: transcript.text || "",
+            words_json: transcript.words || [],
+          });
+
+        if (transcriptError) {
+          console.warn("Could not insert transcript:", transcriptError.message);
+        }
       }
     }
 
@@ -203,6 +230,26 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Admin client unavailable" }, { status: 500 });
     }
 
+    // Helper to normalize transcripts (mapping words_json -> words) and sort edl_revisions
+    const normalizeProject = (p: Record<string, any>, videoStreamUrl: string | null) => {
+      const normalizedTranscripts = (p.transcripts || []).map((t: Record<string, any>) => ({
+        ...t,
+        words: t.words_json || t.words || [],
+        transcript_text: t.full_text || t.transcript_text || "",
+      }));
+
+      const sortedEdl = (p.edl_revisions || []).sort(
+        (a: Record<string, any>, b: Record<string, any>) => (b.revision_number || 0) - (a.revision_number || 0)
+      );
+
+      return {
+        ...p,
+        transcripts: normalizedTranscripts,
+        edl_revisions: sortedEdl,
+        videoStreamUrl,
+      };
+    };
+
     if (id) {
       const { data: project, error } = await admin
         .from("projects")
@@ -222,10 +269,7 @@ export async function GET(req: NextRequest) {
       }
 
       return NextResponse.json({
-        project: {
-          ...project,
-          videoStreamUrl,
-        },
+        project: normalizeProject(project, videoStreamUrl),
       });
     }
 
@@ -254,10 +298,7 @@ export async function GET(req: NextRequest) {
             // ignore streaming URL error on batch listing
           }
         }
-        return {
-          ...p,
-          videoStreamUrl,
-        };
+        return normalizeProject(p, videoStreamUrl);
       })
     );
 
