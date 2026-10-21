@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import {
   FileText,
   Type,
@@ -22,9 +22,10 @@ import {
   Music,
   Bell,
   Trash2,
+  ShieldCheck,
 } from "lucide-react";
-import { StudioWord, CaptionStyle, StudioTab, TimelineCut } from "@/types/studio";
-import { formatTimecode } from "@/lib/studio-utils";
+import { StudioWord, CaptionStyle, StudioTab, TimelineCut, SilenceGap } from "@/types/studio";
+import { formatTimecode, detectSilenceGaps } from "@/lib/studio-utils";
 
 interface StudioInspectorProps {
   activeTab: StudioTab;
@@ -39,6 +40,10 @@ interface StudioInspectorProps {
   onDeleteAllFillers: () => void;
   onRestoreAllCuts?: () => void;
   onAutoCutSilences: () => void;
+  onToggleSilenceCut?: (gap: SilenceGap) => void;
+  onRestoreAllSilences?: () => void;
+  silenceThreshold?: number;
+  onSilenceThresholdChange?: (val: number) => void;
   captionStyle: CaptionStyle;
   onCaptionStyleChange: (style: CaptionStyle) => void;
   onExecuteCopilotPrompt: (prompt: string) => void;
@@ -58,6 +63,10 @@ export function StudioInspector({
   onDeleteAllFillers,
   onRestoreAllCuts,
   onAutoCutSilences,
+  onToggleSilenceCut,
+  onRestoreAllSilences,
+  silenceThreshold: propSilenceThreshold,
+  onSilenceThresholdChange,
   captionStyle,
   onCaptionStyleChange,
   onExecuteCopilotPrompt,
@@ -76,8 +85,13 @@ export function StudioInspector({
   const [autoDucking, setAutoDucking] = useState(true);
   const [duckingLevel, setDuckingLevel] = useState(75);
 
-  // Silence threshold
-  const [silenceThreshold, setSilenceThreshold] = useState(0.5);
+  // Silence threshold (supports local or controlled)
+  const [localSilenceThreshold, setLocalSilenceThreshold] = useState(0.5);
+  const silenceThreshold = propSilenceThreshold ?? localSilenceThreshold;
+  const handleSilenceThresholdChange = (val: number) => {
+    setLocalSilenceThreshold(val);
+    onSilenceThresholdChange?.(val);
+  };
 
   const fillerCount = useMemo(() => {
     return words.filter((w) => w.isFiller && !w.deleted).length;
@@ -166,23 +180,42 @@ export function StudioInspector({
     setSelectedWordIds(new Set());
   };
 
-  // Detect pauses between words
-  const pauseGaps = useMemo(() => {
-    const gaps: { afterId: string; duration: number; start: number }[] = [];
-    for (let i = 0; i < words.length - 1; i++) {
-      const current = words[i];
-      const next = words[i + 1];
-      const gap = next.start - current.end;
-      if (gap >= silenceThreshold) {
-        gaps.push({
-          afterId: current.id,
-          duration: parseFloat(gap.toFixed(2)),
-          start: current.end,
-        });
-      }
-    }
-    return gaps;
-  }, [words, silenceThreshold]);
+  // Detect real silence gaps with 0.05s safety padding
+  const detectedSilences = useMemo(() => {
+    return detectSilenceGaps(words, duration, silenceThreshold, 0.05);
+  }, [words, duration, silenceThreshold]);
+
+  // Check if a silence gap is currently cut in timeline cuts
+  const isGapCut = useCallback(
+    (gap: SilenceGap) => {
+      return cuts.some(
+        (c) =>
+          c.id === `cut-silence-${gap.id}` ||
+          (Math.abs(c.start - gap.start) < 0.08 && Math.abs(c.end - gap.end) < 0.08)
+      );
+    },
+    [cuts]
+  );
+
+  const cutGapsCount = useMemo(() => {
+    return detectedSilences.filter(isGapCut).length;
+  }, [detectedSilences, isGapCut]);
+
+  const uncutGaps = useMemo(() => {
+    return detectedSilences.filter((g) => !isGapCut(g));
+  }, [detectedSilences, isGapCut]);
+
+  const totalSilenceSecs = useMemo(() => {
+    return detectedSilences.reduce((acc, g) => acc + g.duration, 0);
+  }, [detectedSilences]);
+
+  const uncutSilenceSecs = useMemo(() => {
+    return uncutGaps.reduce((acc, g) => acc + g.duration, 0);
+  }, [uncutGaps]);
+
+  const cutSilenceSecs = useMemo(() => {
+    return detectedSilences.filter(isGapCut).reduce((acc, g) => acc + g.duration, 0);
+  }, [detectedSilences, isGapCut]);
 
   const handleCopilotSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -542,28 +575,58 @@ export function StudioInspector({
                   <Scissors className="h-4 w-4 text-violet-400" />
                   Silence Detection Engine
                 </span>
-                <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/30">
-                  {pauseGaps.length} Pauses
+                <span
+                  className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                    cutGapsCount > 0 && cutGapsCount === detectedSilences.length
+                      ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+                      : "text-amber-300 bg-amber-400/10 border-amber-400/30"
+                  }`}
+                >
+                  {cutGapsCount > 0
+                    ? `${cutGapsCount}/${detectedSilences.length} Cut`
+                    : `${detectedSilences.length} Pauses`}
                 </span>
               </div>
               <p className="text-xs text-zinc-400 leading-relaxed mb-3">
-                Automatically cuts awkward pauses and breaths to boost viewer watch-time retention.
+                Smart jump cut engine removes dead air and awkward breaths with 50ms safety margins so words never get clipped.
               </p>
 
-              <button
-                onClick={onAutoCutSilences}
-                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-zinc-950 font-black text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer"
-              >
-                <Zap className="h-3.5 w-3.5 fill-current" />
-                <span>Auto-Cut All {pauseGaps.length} Silences (-4.2s)</span>
-              </button>
+              {/* Action Button: Auto-Cut or Restore */}
+              {uncutGaps.length > 0 ? (
+                <button
+                  onClick={onAutoCutSilences}
+                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-zinc-950 font-black text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer active:scale-95"
+                >
+                  <Zap className="h-3.5 w-3.5 fill-current" />
+                  <span>
+                    Auto-Cut All {uncutGaps.length} Silences (-{uncutSilenceSecs.toFixed(1)}s)
+                  </span>
+                </button>
+              ) : detectedSilences.length > 0 ? (
+                <button
+                  onClick={onRestoreAllSilences || onRestoreAllCuts}
+                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold text-xs shadow-lg shadow-emerald-500/10 transition-all cursor-pointer active:scale-95"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>All Pauses Cut! Click to Restore All</span>
+                </button>
+              ) : (
+                <button
+                  disabled
+                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-zinc-800/50 text-zinc-500 font-semibold text-xs border border-white/5 cursor-not-allowed"
+                >
+                  <span>No Silences Detected</span>
+                </button>
+              )}
             </div>
 
-            {/* Threshold Slider */}
-            <div className="p-3 rounded-xl bg-[#181820] border border-white/5 space-y-2">
+            {/* Threshold Slider & Presets */}
+            <div className="p-3 rounded-xl bg-[#181820] border border-white/5 space-y-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-zinc-400 font-medium">Pause Sensitivity Threshold</span>
-                <span className="text-xs font-mono font-bold text-white">{silenceThreshold}s</span>
+                <span className="text-xs font-mono font-bold text-white bg-zinc-800 px-2 py-0.5 rounded border border-white/10">
+                  {silenceThreshold.toFixed(1)}s
+                </span>
               </div>
               <input
                 type="range"
@@ -571,14 +634,170 @@ export function StudioInspector({
                 max={1.5}
                 step={0.1}
                 value={silenceThreshold}
-                onChange={(e) => setSilenceThreshold(parseFloat(e.target.value))}
+                onChange={(e) => handleSilenceThresholdChange(parseFloat(e.target.value))}
                 className="w-full accent-violet-500 cursor-pointer"
               />
-              <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
-                <span>0.2s (Aggressive)</span>
-                <span>0.5s (Natural)</span>
-                <span>1.5s (Lenient)</span>
+              <div className="flex justify-between items-center text-[10px] text-zinc-500 font-mono">
+                <button
+                  onClick={() => handleSilenceThresholdChange(0.3)}
+                  className={`hover:text-white transition-colors cursor-pointer px-1.5 py-0.5 rounded ${
+                    Math.abs(silenceThreshold - 0.3) < 0.05 ? "text-violet-400 font-bold bg-violet-500/10" : ""
+                  }`}
+                >
+                  0.3s (Aggressive)
+                </button>
+                <button
+                  onClick={() => handleSilenceThresholdChange(0.5)}
+                  className={`hover:text-white transition-colors cursor-pointer px-1.5 py-0.5 rounded ${
+                    Math.abs(silenceThreshold - 0.5) < 0.05 ? "text-amber-400 font-bold bg-amber-500/10" : ""
+                  }`}
+                >
+                  0.5s (Natural)
+                </button>
+                <button
+                  onClick={() => handleSilenceThresholdChange(1.0)}
+                  className={`hover:text-white transition-colors cursor-pointer px-1.5 py-0.5 rounded ${
+                    Math.abs(silenceThreshold - 1.0) < 0.05 ? "text-indigo-400 font-bold bg-indigo-500/10" : ""
+                  }`}
+                >
+                  1.0s (Lenient)
+                </button>
               </div>
+
+              <div className="pt-1 border-t border-white/5 flex items-center justify-between text-[10px] text-zinc-400">
+                <span className="flex items-center gap-1">
+                  <ShieldCheck className="h-3 w-3 text-emerald-400" />
+                  Speech guard safety:
+                </span>
+                <span className="font-mono text-zinc-300">±0.05s padding</span>
+              </div>
+            </div>
+
+            {/* Retention & Watch-Time Impact */}
+            {detectedSilences.length > 0 && (
+              <div className="p-3 rounded-xl bg-violet-950/20 border border-violet-500/20 flex items-center justify-between text-xs">
+                <div>
+                  <div className="text-[10px] text-zinc-400 uppercase tracking-wider font-semibold">
+                    Watch-Time Boost
+                  </div>
+                  <div className="text-sm font-black text-amber-400 flex items-center gap-1">
+                    <Flame className="h-3.5 w-3.5 fill-current" />
+                    <span>+{Math.min(35, Math.max(8, Math.round(totalSilenceSecs * 3.5)))}% Retention</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] text-zinc-400">Dead Air Recoverable</div>
+                  <div className="text-xs font-mono font-bold text-white">
+                    {cutSilenceSecs > 0 ? (
+                      <span className="text-emerald-400">-{cutSilenceSecs.toFixed(1)}s cut</span>
+                    ) : (
+                      <span>{totalSilenceSecs.toFixed(1)}s total</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Live Detected Silences Itemized List */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs px-1">
+                <span className="font-bold text-zinc-300 flex items-center gap-1.5">
+                  <Scissors className="h-3.5 w-3.5 text-violet-400" />
+                  Detected Pauses ({detectedSilences.length})
+                </span>
+                {cutGapsCount > 0 && (
+                  <span className="text-[10px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded">
+                    {cutGapsCount} Active Cuts
+                  </span>
+                )}
+              </div>
+
+              {detectedSilences.length === 0 ? (
+                <div className="p-6 rounded-xl bg-[#181820] border border-white/5 text-center text-zinc-500">
+                  <p className="text-xs font-semibold text-zinc-400 mb-1">No Silences Found</p>
+                  <p className="text-[11px] leading-relaxed">
+                    {words.length === 0
+                      ? "Import a video with speech to detect and jump-cut pauses automatically."
+                      : `No pauses >= ${silenceThreshold.toFixed(1)}s detected. Try moving the threshold slider to 0.3s.`}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
+                  {detectedSilences.map((gap) => {
+                    const isCut = isGapCut(gap);
+                    const isPlayingInside =
+                      currentTime >= gap.rawStart && currentTime <= gap.rawEnd;
+
+                    return (
+                      <div
+                        key={gap.id}
+                        className={`p-2.5 rounded-xl border text-xs transition-all flex items-center justify-between ${
+                          isCut
+                            ? "bg-rose-950/20 border-rose-900/30 text-rose-300/80"
+                            : isPlayingInside
+                            ? "bg-amber-500/15 border-amber-500/50 shadow-md shadow-amber-500/10"
+                            : "bg-[#181820] hover:bg-[#20202a] border-white/5 text-zinc-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <button
+                            onClick={() => onSeekToWord(gap.rawStart)}
+                            className="p-1.5 rounded-lg bg-black/40 hover:bg-violet-600/30 text-zinc-400 hover:text-white transition-colors cursor-pointer shrink-0"
+                            title={`Jump to silence at ${formatTimecode(gap.rawStart)}`}
+                          >
+                            <VolumeX className="h-3.5 w-3.5" />
+                          </button>
+                          <div className="truncate">
+                            <div className="flex items-center gap-1.5 font-mono text-[11px] font-semibold">
+                              <span>{formatTimecode(gap.start)}</span>
+                              <span className="text-zinc-600">→</span>
+                              <span>{formatTimecode(gap.end)}</span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${
+                                  isCut
+                                    ? "bg-rose-500/20 text-rose-300"
+                                    : "bg-amber-400/20 text-amber-300"
+                                }`}
+                              >
+                                {gap.duration.toFixed(2)}s
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-zinc-500 truncate mt-0.5">
+                              {gap.prevWord && gap.nextWord
+                                ? `"${gap.prevWord}" ⏸ "${gap.nextWord}"`
+                                : gap.prevWord
+                                ? `After "${gap.prevWord}"`
+                                : `Before "${gap.nextWord}"`}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Cut / Restore Toggle Button */}
+                        <button
+                          onClick={() => onToggleSilenceCut?.(gap)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0 ${
+                            isCut
+                              ? "bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30"
+                              : "bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-zinc-950 shadow-sm shadow-amber-500/20"
+                          }`}
+                        >
+                          {isCut ? (
+                            <>
+                              <RotateCcw className="h-3 w-3" />
+                              <span>Restore</span>
+                            </>
+                          ) : (
+                            <>
+                              <Scissors className="h-3 w-3" />
+                              <span>Cut</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}

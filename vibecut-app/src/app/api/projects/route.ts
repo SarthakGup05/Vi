@@ -363,12 +363,12 @@ export async function DELETE(req: NextRequest) {
 }
 
 /**
- * PATCH: Update project metadata (title, aspect ratio)
+ * PATCH: Update project metadata (title, aspect ratio) and optionally persist EDL revisions
  */
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, title, aspect_ratio } = body;
+    const { id, title, aspect_ratio, edl, applied_prompt } = body;
 
     if (!id) {
       return NextResponse.json({ error: "Project ID is required" }, { status: 400 });
@@ -394,7 +394,37 @@ export async function PATCH(req: NextRequest) {
 
     if (error) throw error;
 
-    return NextResponse.json({ project: updated });
+    let edlRevision = null;
+    if (edl) {
+      const { data: latestRev } = await admin
+        .from("edl_revisions")
+        .select("revision_number")
+        .eq("project_id", id)
+        .order("revision_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const nextRevision = (latestRev?.revision_number || 0) + 1;
+
+      const { data: revData, error: revError } = await admin
+        .from("edl_revisions")
+        .insert({
+          project_id: id,
+          revision_number: nextRevision,
+          applied_prompt: applied_prompt || "EDL revision update",
+          edl_payload: edl,
+        })
+        .select()
+        .single();
+
+      if (revError) {
+        console.warn("Could not insert edl_revision in PATCH:", revError.message);
+      } else {
+        edlRevision = revData;
+      }
+    }
+
+    return NextResponse.json({ project: updated, edlRevision });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to update project";
     return NextResponse.json({ error: message }, { status: 500 });

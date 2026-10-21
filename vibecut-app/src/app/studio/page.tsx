@@ -20,12 +20,14 @@ import {
   CaptionStyle,
   ProjectVaultItem,
   TimelineCut,
+  SilenceGap,
 } from "@/types/studio";
 import {
   extractVideoMetadata,
   detectFillerWords,
   formatTimecode,
   extractAudioFromMediaFile,
+  detectSilenceGaps,
 } from "@/lib/studio-utils";
 import {
   Sparkles,
@@ -84,6 +86,7 @@ function StudioContent() {
 
   const [words, setWords] = useState<StudioWord[]>([]);
   const [timelineCuts, setTimelineCuts] = useState<TimelineCut[]>([]);
+  const [silenceThreshold, setSilenceThreshold] = useState<number>(0.5);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"saved" | "saving" | "unsaved">("saved");
   const [lastSavedText, setLastSavedText] = useState("Not saved");
   const [copilotFeedback, setCopilotFeedback] = useState<string | null>(null);
@@ -496,16 +499,72 @@ function StudioContent() {
     showToast("Restored all cuts across transcript & timeline!");
   };
 
-  // Auto-Cut All Silences
-  const handleAutoCutSilences = () => {
-    // Generate slice markers on timeline
-    const cuts: TimelineCut[] = [
-      { id: "cut-1", start: 2.45, end: 2.8, type: "silence" },
-      { id: "cut-2", start: 7.8, end: 8.0, type: "silence" },
-    ];
-    setTimelineCuts(cuts);
-    showToast("Auto-cut 14 silent pauses (-4.2s watch-time boost)!");
-  };
+  // Real-time calculated silence gaps with configurable sensitivity threshold and safety padding
+  const silenceGaps = useMemo(() => {
+    return detectSilenceGaps(words, duration, silenceThreshold, 0.05);
+  }, [words, duration, silenceThreshold]);
+
+  const silenceCount = silenceGaps.length;
+
+  // Auto-Cut All Silences: preserves manual cuts and creates timeline cuts for all detected pauses
+  const handleAutoCutSilences = useCallback((threshold: number = silenceThreshold) => {
+    const detected = detectSilenceGaps(words, duration, threshold, 0.05);
+    if (detected.length > 0) {
+      // Retain existing non-silence cuts
+      const nonSilenceCuts = timelineCuts.filter((c) => c.type !== "silence");
+      const silenceTimelineCuts: TimelineCut[] = detected.map((g) => ({
+        id: `cut-silence-${g.id}`,
+        start: g.start,
+        end: g.end,
+        type: "silence",
+        label: `Silence (${g.duration}s)`,
+      }));
+      const merged = [...nonSilenceCuts, ...silenceTimelineCuts].sort((a, b) => a.start - b.start);
+      setTimelineCuts(merged);
+      const totalCutSec = detected.reduce((acc, g) => acc + g.duration, 0);
+      showToast(`Auto-cut ${silenceTimelineCuts.length} silent pauses (-${totalCutSec.toFixed(1)}s jump-cut applied)!`);
+    } else {
+      showToast(`No silent pauses >= ${threshold.toFixed(1)}s found in transcript.`);
+    }
+  }, [words, duration, silenceThreshold, timelineCuts, showToast]);
+
+  // Toggle individual silence cut
+  const handleToggleSilenceCut = useCallback(
+    (gap: SilenceGap) => {
+      const existingCutIndex = timelineCuts.findIndex(
+        (c) =>
+          c.id === `cut-silence-${gap.id}` ||
+          (Math.abs(c.start - gap.start) < 0.05 && Math.abs(c.end - gap.end) < 0.05)
+      );
+
+      if (existingCutIndex !== -1) {
+        // Restore
+        const updated = timelineCuts.filter((_, idx) => idx !== existingCutIndex);
+        setTimelineCuts(updated);
+        showToast(`Restored pause at ${formatTimecode(gap.start)}`);
+      } else {
+        // Cut
+        const newCut: TimelineCut = {
+          id: `cut-silence-${gap.id}`,
+          start: gap.start,
+          end: gap.end,
+          type: "silence",
+          label: `Silence (${gap.duration}s)`,
+        };
+        const updated = [...timelineCuts, newCut].sort((a, b) => a.start - b.start);
+        setTimelineCuts(updated);
+        showToast(`Cut ${gap.duration}s silence at ${formatTimecode(gap.start)}`);
+      }
+    },
+    [timelineCuts, showToast]
+  );
+
+  // Restore All Silences (clears only silence cuts, keeping manual cuts intact)
+  const handleRestoreAllSilences = useCallback(() => {
+    const remaining = timelineCuts.filter((c) => c.type !== "silence");
+    setTimelineCuts(remaining);
+    showToast("Restored all silence cuts across timeline");
+  }, [timelineCuts, showToast]);
 
   // Timeline Split at Playhead
   const handleAddSplitCut = (time: number) => {
@@ -550,18 +609,6 @@ function StudioContent() {
   }, [words, timelineCuts]);
 
   const effectiveDuration = Math.max(0, duration - totalCutDuration);
-
-  // Dynamic silence count based on real pauses (>= 0.5s) in transcript
-  const silenceCount = useMemo(() => {
-    if (!words || words.length < 2) return 0;
-    let count = 0;
-    for (let i = 0; i < words.length - 1; i++) {
-      if (words[i + 1].start - words[i].end >= 0.5) {
-        count++;
-      }
-    }
-    return count;
-  }, [words]);
 
   // Project Vault Selection - loads real project details, media stream and transcript
   const handleSelectVaultProject = async (item: ProjectVaultItem) => {
@@ -638,7 +685,7 @@ function StudioContent() {
     setAutoSaveStatus("unsaved");
     const debounceTimer = setTimeout(() => {
       handleSaveDraft();
-    }, 4000);
+    }, 2000);
 
     return () => clearTimeout(debounceTimer);
   }, [words, timelineCuts, captionStyle, aspectRatio, activeProjectId, videoSrc]);
@@ -648,7 +695,7 @@ function StudioContent() {
     const p = prompt.toLowerCase();
     if (p.includes("silence") || p.includes("pause")) {
       handleAutoCutSilences();
-      setCopilotFeedback('Copilot: "Trimmed 14 silent pauses across the timeline"');
+      setCopilotFeedback(`Copilot: "Trimmed ${silenceCount} silent pause${silenceCount === 1 ? "" : "s"} across the timeline"`);
     } else if (p.includes("gold") || p.includes("hormozi") || p.includes("keyword")) {
       setCaptionStyle("hormozi");
       setCopilotFeedback('Copilot: "Applied Hormozi Gold kinetic subtitle preset"');
@@ -862,6 +909,10 @@ function StudioContent() {
           onDeleteAllFillers={handleDeleteAllFillers}
           onRestoreAllCuts={handleRestoreAllCuts}
           onAutoCutSilences={handleAutoCutSilences}
+          onToggleSilenceCut={handleToggleSilenceCut}
+          onRestoreAllSilences={handleRestoreAllSilences}
+          silenceThreshold={silenceThreshold}
+          onSilenceThresholdChange={setSilenceThreshold}
           captionStyle={captionStyle}
           onCaptionStyleChange={setCaptionStyle}
           onExecuteCopilotPrompt={handleExecuteCopilotPrompt}

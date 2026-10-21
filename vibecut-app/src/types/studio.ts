@@ -70,3 +70,15 @@ export interface TimelineCut {
   type: "silence" | "manual" | "filler";
   label?: string;
 }
+
+export interface SilenceGap {
+  id: string;
+  start: number;       // Safety-padded cut start time (in seconds)
+  end: number;         // Safety-padded cut end time (in seconds)
+  duration: number;    // Effective silence cut duration
+  rawStart: number;    // Exact speech boundary start
+  rawEnd: number;      // Exact speech boundary end
+  rawDuration: number; // Unpadded silence duration
+  prevWord?: string;   // Spoken word preceding silence
+  nextWord?: string;   // Spoken word following silence
+}
